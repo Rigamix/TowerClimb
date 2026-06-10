@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Tower prototype v10</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#10141d;font-family:ui-monospace,Menlo,Consolas,monospace;}
+  #c{display:block;width:100%;height:100%;}
+  #hud{position:absolute;top:10px;left:12px;color:#cdd6e4;font-size:13px;line-height:1.7;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,.6);}
+  #hud b{color:#fff;font-weight:600;}
+  #msg{position:absolute;top:14%;left:50%;transform:translateX(-50%);color:#ffd97a;font-size:15px;text-align:center;pointer-events:none;opacity:0;transition:opacity .3s;text-shadow:0 1px 3px rgba(0,0,0,.8);max-width:90%;}
+  #edge{position:absolute;left:0;right:0;bottom:0;height:12%;background:linear-gradient(to bottom,rgba(0,0,0,0),rgba(120,20,30,.55));pointer-events:none;}
+  #pad{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);width:172px;height:172px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);touch-action:none;user-select:none;-webkit-user-select:none;}
+  #padNub{position:absolute;left:50%;top:50%;width:66px;height:66px;border-radius:50%;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);transform:translate(-50%,-50%);pointer-events:none;display:flex;align-items:center;justify-content:center;color:#dfe6f0;font-size:11px;}
+  #padHints{position:absolute;inset:0;pointer-events:none;color:#7f8a9c;font-size:12px;}
+  #padHints span{position:absolute;left:50%;top:50%;}
+  #help{position:absolute;top:10px;right:14px;color:#7b8698;font-size:11px;text-align:right;pointer-events:none;line-height:1.6;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="edge"></div>
+<div id="hud">
+  face <b id="face">north</b> <span id="pips"></span><br>
+  key <b id="key">no</b> &middot; deaths <b id="deaths">0</b><br>
+  <span id="stat"></span>
+</div>
+<div id="msg"></div>
+<div id="help">slide the pad to move &middot; tap it to jump<br>walk into a block to climb it<br>keyboard: WASD + space &middot; R restarts</div>
+<div id="pad">
+  <div id="padHints">
+    <span style="transform:translate(-50%,-78px)">in</span>
+    <span style="transform:translate(-50%,64px)">out</span>
+    <span style="transform:translate(-80px,-50%)">&#9664;</span>
+    <span style="transform:translate(64px,-50%)">&#9654;</span>
+  </div>
+  <div id="padNub">JUMP</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---------- voxel level ----------
+// LAYERS[y][z] is a 6-char string indexed by x. Footprint 6x6, lava core at x 2-3, z 2-3 (auto).
+const LAYERS = [
+ ["######","######","######","######","######","######"], // y0 base
+ ["......","......","......","......","......","....#."], // y1
+ ["......","......","......","......","....#.",".....#"], // y2
+ ["...###","....##","....##","....##",".....#","......"], // y3 plaza + south dead-end
+ ["...K..","......",".....F","......","....#.","......"], // y4 stone S1
+ ["......","......","......","......","...#..",".#####"], // y5 catwalk + stone S2
+ ["......","......","......","......",".#....","#C.D.."], // y6 step, crank, door, high stone
+ ["......",".....#",".....#",".....#","......","......"], // y7 RING: bridge parked on east
+ ["......","......","......","......","..#...","......"], // y8 riser
+ ["......","......","......","#.....","##....","......"], // y9
+ ["......","......","......","G.....","......","......"]  // y10 goal
+];
+const W = 6, ROWS = LAYERS.length, RING = 7, CX = W / 2;
+const FACE_NAMES = ["north","east","south","west"];
+const RISE = 1 / 2.6;
+const ROLL_T = 0.15, CLIMB_T = 0.26, HOP_T = 0.24, FALL_T = 0.085;
+
+let vox, G, act, hasKey, frozen, camH, grace, won, deaths = 0, dirty, rotating = null, carried = false;
+let msgT = 0, lockMsgCd = 0, jumpBuf = 0, face = 0;
+const spawnCell = {x: 1, y: 1, z: 5};
+
+function buildVox(){ vox = LAYERS.map(layer => layer.map(s => s.split(''))); }
+function inB(x, z){ return x >= 0 && x < W && z >= 0 && z < W; }
+function inCore(x, z){ return x >= 2 && x <= 3 && z >= 2 && z <= 3; }
+function cellAt(x, y, z){
+  if(!inB(x, z) || y < 0 || y >= ROWS + 6) return y < 0 ? '#' : '.';
+  if(y >= 1 && inCore(x, z)) return '~';
+  if(y >= ROWS) return '.';
+  return vox[y][z][x];
+}
+function isSolid(ch){ return ch === '#' || ch === 'D' || ch === '~'; }
+function free(x, y, z){ return inB(x, z) && !isSolid(cellAt(x, y, z)); }
+
+function resetRun(full){
+  buildVox();
+  G = {x: spawnCell.x, y: spawnCell.y, z: spawnCell.z};
+  act = null; hasKey = false; frozen = 0; won = false; rotating = null;
+  camH = G.y + 0.6; grace = full ? 5 : 3; face = 0;
+  dirty = true;
+  baseQ.set(0, 0, 0, 1);
+  roller.quaternion.set(0, 0, 0, 1);
+  player.position.copy(cellCenter(G.x, G.y, G.z));
+  if(full) showMsg("two ways up. mind the lava.");
+}
+function showMsg(t){ const m = document.getElementById('msg'); m.textContent = t; m.style.opacity = 1; msgT = 3.2; }
+function die(reason){
+  deaths++; document.getElementById('deaths').textContent = deaths;
+  resetRun(false);
+  showMsg(reason + " same layout, go again.");
+}
+
+// ---------- discrete movement ----------
+function startAct(type, tx, ty, tz, d){
+  act = {type, fx: G.x, fy: G.y, fz: G.z, tx, ty, tz, t: 0,
+         dur: type === 'roll' ? ROLL_T : type === 'climb' ? CLIMB_T : type === 'hop' ? HOP_T : FALL_T,
+         dx: d ? d.x : 0, dz: d ? d.z : 0};
+}
+function tryRoll(d){
+  const tx = G.x + d.x, tz = G.z + d.z;
+  if(!inB(tx, tz)) return; // never out of bounds
+  const ch = cellAt(tx, G.y, tz);
+  if(ch === 'D'){
+    if(hasKey){ vox[G.y][tz][tx] = '.'; hasKey = false; dirty = true; showMsg("unlocked"); }
+    else if(lockMsgCd <= 0){ showMsg("locked. find the key."); lockMsgCd = 2; }
+    return;
+  }
+  if(ch === '#'){
+    // magnet: walking into a block swings you up onto it
+    if(free(tx, G.y + 1, tz) && free(G.x, G.y + 1, G.z)) startAct('climb', tx, G.y + 1, tz, d);
+    return;
+  }
+  if(isSolid(ch)) return; // no magnet climb onto the lava core
+  startAct('roll', tx, G.y, tz, d);
+}
+function tryJump(d){
+  const X = G.x, Y = G.y, Z = G.z;
+  const tx = X + d.x, tz = Z + d.z, ux = X + 2*d.x, uz = Z + 2*d.z;
+  const adj = inB(tx, tz) ? cellAt(tx, Y, tz) : '#';
+  if(isSolid(adj)){
+    // climb onto the adjacent block (not onto a locked door)
+    if(adj !== 'D' && free(tx, Y+1, tz) && free(X, Y+1, Z)) startAct('climb', tx, Y+1, tz, d);
+    return;
+  }
+  if(!free(X, Y+1, Z)) return; // ceiling above
+  // leap up across a 1-gap onto a block one higher
+  if(inB(ux, uz) && cellAt(ux, Y, uz) === '#' && free(ux, Y+1, uz) && free(tx, Y+1, tz)){
+    startAct('hop', ux, Y+1, uz, d); return;
+  }
+  // flat leap across a 1-gap (falls after if no support)
+  if(inB(ux, uz) && free(ux, Y, uz) && free(tx, Y+1, tz)){
+    startAct('hop', ux, Y, uz, d); return;
+  }
+  // small forward hop
+  if(free(tx, Y, tz)) startAct('hop', tx, Y, tz, d);
+}
+function land(){
+  if(act.type === 'roll' || act.type === 'climb'){
+    const axis = new THREE.Vector3(act.dz, 0, -act.dx).normalize();
+    const q = new THREE.Quaternion().setFromAxisAngle(axis, act.type === 'climb' ? Math.PI : Math.PI / 2);
+    baseQ.premultiply(q).normalize();
+  }
+  G.x = act.tx; G.y = act.ty; G.z = act.tz;
+  act = null;
+  roller.quaternion.copy(baseQ);
+  player.position.copy(cellCenter(G.x, G.y, G.z));
+  const ch = cellAt(G.x, G.y, G.z);
+  if(ch === 'K'){ vox[G.y][G.z][G.x] = '.'; hasKey = true; dirty = true; showMsg("key collected"); }
+  else if(ch === 'F'){ vox[G.y][G.z][G.x] = '.'; frozen += 6; dirty = true; showMsg("time frozen 6s"); }
+  else if(ch === 'C'){ vox[G.y][G.z][G.x] = '.'; dirty = true; startRing(); return; }
+  else if(ch === 'G'){ won = true; showMsg("section cleared. press R to run it again."); return; }
+  const below = cellAt(G.x, G.y - 1, G.z);
+  if(below === '~'){ die("burned by the core."); return; }
+  if(!isSolid(below)) startAct('fall', G.x, G.y - 1, G.z, null);
+}
+
+const keys = {};
+function update(dt){
+  if(won) return;
+  if(grace > 0) grace -= dt;
+  else if(frozen > 0) frozen -= dt;
+  else camH += RISE * dt;
+  if(lockMsgCd > 0) lockMsgCd -= dt;
+  if(jumpBuf > 0) jumpBuf -= dt;
+
+  if(!rotating && !act){
+    const RV = [[1,0],[0,-1],[-1,0],[0,1]][face]; // camera right
+    const FV = [[0,-1],[-1,0],[0,1],[1,0]][face]; // into the screen
+    let d = null;
+    if(keys['d'] || keys['arrowright']) d = {x: RV[0], z: RV[1]};
+    else if(keys['a'] || keys['arrowleft']) d = {x: -RV[0], z: -RV[1]};
+    else if(keys['w'] || keys['arrowup']) d = {x: FV[0], z: FV[1]};
+    else if(keys['s'] || keys['arrowdown']) d = {x: -FV[0], z: -FV[1]};
+    if(jumpBuf > 0 && d){ jumpBuf = 0; tryJump(d); }
+    else if(d) tryRoll(d);
+  }
+
+  // face selection with hysteresis (corner cells keep the previous face)
+  const dx = G.x + 0.5 - CX, dz = G.z + 0.5 - CX, ax = Math.abs(dx), az = Math.abs(dz);
+  if(Math.abs(ax - az) > 0.35) face = az > ax ? (dz > 0 ? 0 : 2) : (dx > 0 ? 1 : 3);
+
+  if(G.y - 2.5 > camH) camH = G.y - 2.5;
+  if(G.y < camH - 6) die("dropped out of frame.");
+}
+
+// ---------- three.js ----------
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x141a26);
+scene.fog = new THREE.Fog(0x141a26, 24, 52);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 120);
+scene.add(new THREE.AmbientLight(0x9fb0c8, 0.85));
+const sun = new THREE.DirectionalLight(0xfff2dd, 0.8);
+sun.position.set(6, 12, 8); scene.add(sun);
+
+const blocksGroup = new THREE.Group(), ringGroup = new THREE.Group();
+scene.add(blocksGroup); scene.add(ringGroup);
+const box = new THREE.BoxGeometry(1, 1, 1);
+const mats = {}, ghostsM = {};
+function mat(hex){ if(!mats[hex]) mats[hex] = new THREE.MeshLambertMaterial({color: hex}); return mats[hex]; }
+function ghost(hex){ if(!ghostsM[hex]) ghostsM[hex] = new THREE.MeshLambertMaterial({color: hex, transparent: true, opacity: 0.2, depthWrite: false}); return ghostsM[hex]; }
+const edgeGeo = new THREE.EdgesGeometry(box);
+const edgeMats = {};
+function edgeLine(hex){ if(!edgeMats[hex]) edgeMats[hex] = new THREE.LineBasicMaterial({color: hex, transparent: true, opacity: 0.5}); return new THREE.LineSegments(edgeGeo, edgeMats[hex]); }
+const lavaMat = new THREE.MeshLambertMaterial({color: 0xff5a1f, emissive: 0xb33000, emissiveIntensity: 0.9});
+let spinners = [], cutList = [];
+
+function cellWorld(x, y, z){ return new THREE.Vector3(x + 0.5 - CX, y, z + 0.5 - CX); }
+function cellCenter(x, y, z){ return new THREE.Vector3(x + 0.5 - CX, y + 0.5, z + 0.5 - CX); }
+
+function rebuildBlocks(){
+  [blocksGroup, ringGroup].forEach(g => { while(g.children.length) g.remove(g.children[0]); });
+  ringGroup.rotation.y = 0;
+  spinners = []; cutList = [];
+  for(let y = 0; y < ROWS + 4; y++) for(let z = 0; z < W; z++) for(let x = 0; x < W; x++){
+    const grp = (y === RING) ? ringGroup : blocksGroup;
+    if(y >= 1 && inCore(x, z)){
+      const m = new THREE.Mesh(box, lavaMat);
+      m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
+      m.add(edgeLine(0x521b04));
+      grp.add(m); cutList.push({m, hex: null});
+      continue;
+    }
+    if(y >= ROWS) continue;
+    const ch = vox[y][z][x];
+    if(ch === '.') continue;
+    let m = null, hex = null;
+    if(ch === '#'){
+      hex = y === RING ? 0x8f7fd6 : ((x + z + y) % 2 ? 0x808a98 : 0x747e8c);
+      m = new THREE.Mesh(box, mat(hex));
+      m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
+      m.add(edgeLine(0x10151d));
+      cutList.push({m, hex});
+    } else if(ch === 'D'){
+      hex = 0x6b4a2b;
+      m = new THREE.Mesh(box, mat(hex));
+      m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
+      m.add(edgeLine(0x10151d));
+      const lock = new THREE.Mesh(box, mat(0xf5c542));
+      lock.scale.set(0.2, 0.28, 1.06);
+      m.add(lock);
+      cutList.push({m, hex});
+    } else {
+      const col = ch === 'K' ? 0xf5c542 : ch === 'F' ? 0x4cc9f0 : ch === 'G' ? 0x4ade80 : 0xa78bfa;
+      m = new THREE.Mesh(box, mat(col));
+      m.scale.setScalar(ch === 'C' ? 0.45 : 0.5);
+      m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
+      if(ch !== 'C') spinners.push(m);
+    }
+    if(m) grp.add(m);
+  }
+  dirty = false;
+}
+
+// player: position-only group > roller (accumulated tumble, world-aligned) + faceG (yaw, carries eyes)
+const player = new THREE.Group();
+const roller = new THREE.Group();
+const faceTints = [0xff9f43, 0xe8862c, 0xffb35c, 0xf2a14d, 0xff8f2e, 0xd97a22];
+const body = new THREE.Mesh(box, faceTints.map(h => new THREE.MeshLambertMaterial({color: h})));
+body.scale.set(0.999, 0.999, 0.999);
+roller.add(body);
+player.add(roller);
+const faceG = new THREE.Group();
+const eL = new THREE.Mesh(box, mat(0x222831)), eR = new THREE.Mesh(box, mat(0x222831));
+eL.scale.setScalar(0.12); eR.scale.setScalar(0.12);
+eL.position.set(-0.18, 0.1, 0.51); eR.position.set(0.18, 0.1, 0.51);
+faceG.add(eL); faceG.add(eR);
+player.add(faceG);
+scene.add(player);
+const baseQ = new THREE.Quaternion();
+
+// depth cues: drop shadow + through-wall silhouette
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.36, 20),
+  new THREE.MeshBasicMaterial({color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false}));
+shadow.rotation.x = -Math.PI / 2; shadow.renderOrder = 3;
+scene.add(shadow);
+const silhouette = new THREE.Mesh(box, new THREE.MeshBasicMaterial({color: 0xffc278, transparent: true, opacity: 0.2, depthTest: false}));
+silhouette.scale.set(0.999, 0.999, 0.999); silhouette.renderOrder = 6;
+roller.add(silhouette);
+
+// ---------- ring rotation ----------
+function startRing(){
+  carried = (G.y - 1 === RING);
+  rotating = {t: 0};
+  if(carried){ player.updateMatrixWorld(); ringGroup.add(player); }
+  showMsg("the slice turns...");
+}
+function finishRing(){
+  const old = vox[RING].map(r => r.slice());
+  for(let z = 0; z < W; z++) for(let x = 0; x < W; x++)
+    vox[RING][x][W - 1 - z] = old[z][x]; // cell (x,z) -> (W-1-z, x)
+  if(carried){
+    const ox = G.x; G.x = W - 1 - G.z; G.z = ox;
+    scene.add(player);
+  }
+  let guard = 0;
+  while(guard++ < 4 && isSolid(cellAt(G.x, G.y, G.z))) G.y++;
+  player.position.copy(cellCenter(G.x, G.y, G.z));
+  rotating = null; dirty = true;
+  const below = cellAt(G.x, G.y - 1, G.z);
+  if(below === '~') die("burned by the core.");
+  else if(!isSolid(below)) startAct('fall', G.x, G.y - 1, G.z, null);
+}
+
+// ---------- input ----------
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
+  if(k === ' '){ if(!e.repeat) jumpBuf = 0.18; }
+  else keys[k] = true;
+  if(k === 'r') resetRun(true);
+});
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+// one-thumb pad: slide to move along an axis, tap to jump
+const pad = document.getElementById('pad'), padNub = document.getElementById('padNub');
+let padPtr = null, padSX = 0, padSY = 0, padMoved = false;
+function padClear(){ keys['a'] = keys['d'] = keys['w'] = keys['s'] = false; padNub.style.transform = 'translate(-50%,-50%)'; }
+pad.addEventListener('pointerdown', e => {
+  e.preventDefault(); padPtr = e.pointerId; padSX = e.clientX; padSY = e.clientY; padMoved = false;
+  pad.setPointerCapture(e.pointerId);
+});
+pad.addEventListener('pointermove', e => {
+  if(e.pointerId !== padPtr) return;
+  const dx = e.clientX - padSX, dy = e.clientY - padSY, DZ = 24;
+  keys['a'] = keys['d'] = keys['w'] = keys['s'] = false;
+  if(Math.hypot(dx, dy) > DZ){
+    padMoved = true;
+    if(Math.abs(dx) > Math.abs(dy)) keys[dx > 0 ? 'd' : 'a'] = true;
+    else keys[dy < 0 ? 'w' : 's'] = true;
+    const cl = Math.min(Math.hypot(dx, dy), 46), ang = Math.atan2(dy, dx);
+    padNub.style.transform = 'translate(calc(-50% + ' + (Math.cos(ang)*cl).toFixed(1) + 'px), calc(-50% + ' + (Math.sin(ang)*cl).toFixed(1) + 'px))';
+  } else padNub.style.transform = 'translate(-50%,-50%)';
+});
+['pointerup','pointercancel'].forEach(ev => pad.addEventListener(ev, e => {
+  if(e.pointerId !== padPtr) return;
+  if(!padMoved) jumpBuf = 0.18;
+  padPtr = null; padClear();
+}));
+
+// ---------- loop ----------
+resetRun(true);
+rebuildBlocks();
+let camA = 0, camDist = 12, last = performance.now();
+function lerpAngle(a, b, t){
+  let d = ((b - a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+  return a + d * t;
+}
+function frame(now){
+  const dt = Math.min((now - last) / 1000, 0.05); last = now;
+  update(dt);
+
+  // advance current move
+  if(act && !rotating && !won){
+    act.t += dt;
+    const k = Math.min(act.t / act.dur, 1);
+    const cf = cellCenter(act.fx, act.fy, act.fz), ct = cellCenter(act.tx, act.ty, act.tz);
+    if(act.type === 'roll' || act.type === 'climb'){
+      // roll: 90deg about the shared bottom edge. climb: 180deg magnet swing about the block's top edge
+      const py = act.type === 'climb' ? cf.y + 0.5 : cf.y - 0.5;
+      const pivot = new THREE.Vector3((cf.x + ct.x) / 2, py, (cf.z + ct.z) / 2);
+      const axis = new THREE.Vector3(act.dz, 0, -act.dx).normalize();
+      const q = new THREE.Quaternion().setFromAxisAngle(axis, k * (act.type === 'climb' ? Math.PI : Math.PI / 2));
+      const off = cf.clone().sub(pivot).applyQuaternion(q);
+      player.position.copy(pivot.add(off));
+      roller.quaternion.copy(q).multiply(baseQ);
+    } else {
+      const p = cf.clone().lerp(ct, k);
+      if(act.type === 'hop') p.y += Math.sin(Math.PI * k) * 0.55;
+      player.position.copy(p);
+    }
+    if(k >= 1) land();
+  }
+
+  if(rotating){
+    rotating.t += dt / 0.8;
+    const k = Math.min(rotating.t, 1), e2 = k < 0.5 ? 2*k*k : 1 - Math.pow(-2*k + 2, 2) / 2;
+    ringGroup.rotation.y = -e2 * Math.PI / 2;
+    if(k >= 1) finishRing();
+  }
+  if(dirty) rebuildBlocks();
+
+  lavaMat.emissiveIntensity = 0.75 + Math.sin(now / 300) * 0.25;
+  spinners.forEach(s => { s.rotation.y += dt * 2; });
+  if(!(rotating && carried))
+    faceG.rotation.y = lerpAngle(faceG.rotation.y, face * Math.PI / 2, Math.min(1, dt * 9));
+
+  // drop shadow under the player (depth cue)
+  {
+    const scx = Math.floor(player.position.x + CX), scz = Math.floor(player.position.z + CX);
+    let sy = -1;
+    for(let yy = Math.floor(player.position.y - 0.501); yy >= 0; yy--)
+      if(isSolid(cellAt(scx, yy, scz))){ sy = yy + 1; break; }
+    if(sy >= 0){ shadow.visible = true; shadow.position.set(player.position.x, sy + 0.02, player.position.z); }
+    else shadow.visible = false;
+  }
+  let targetA = face * Math.PI / 2;
+  if(rotating && carried) targetA += ringGroup.rotation.y;
+  camA = lerpAngle(camA, targetA, Math.min(1, dt * 5));
+  camera.position.set(Math.sin(camA) * camDist, camH + camDist * 0.55, Math.cos(camA) * camDist);
+  camera.lookAt(0, camH + 0.2, 0);
+
+  document.getElementById('face').textContent = FACE_NAMES[face];
+  document.getElementById('pips').textContent = FACE_NAMES.map((_, i) => i === face ? '\u25CF' : '\u25CB').join('');
+  document.getElementById('key').textContent = hasKey ? 'yes' : 'no';
+  document.getElementById('stat').textContent =
+    won ? 'cleared' : grace > 0 ? 'camera rises in ' + Math.ceil(grace) + 's' : frozen > 0 ? 'time frozen ' + Math.ceil(frozen) + 's' : 'camera is rising';
+  if(msgT > 0){ msgT -= dt; if(msgT <= 0) document.getElementById('msg').style.opacity = 0; }
+
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if(canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())){
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    const halfH = Math.atan(Math.tan(camera.fov * Math.PI / 360) * camera.aspect);
+    camDist = Math.max(10, 4.8 / Math.tan(halfH));
+  }
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
