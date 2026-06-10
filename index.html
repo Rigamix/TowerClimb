@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Tower prototype v10</title>
+<title>Tower prototype v30</title>
 <style>
   html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#10141d;font-family:ui-monospace,Menlo,Consolas,monospace;}
   #c{display:block;width:100%;height:100%;}
@@ -11,7 +11,7 @@
   #hud b{color:#fff;font-weight:600;}
   #msg{position:absolute;top:14%;left:50%;transform:translateX(-50%);color:#ffd97a;font-size:15px;text-align:center;pointer-events:none;opacity:0;transition:opacity .3s;text-shadow:0 1px 3px rgba(0,0,0,.8);max-width:90%;}
   #edge{position:absolute;left:0;right:0;bottom:0;height:12%;background:linear-gradient(to bottom,rgba(0,0,0,0),rgba(120,20,30,.55));pointer-events:none;}
-  #pad{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);width:172px;height:172px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);touch-action:none;user-select:none;-webkit-user-select:none;}
+  #pad{position:absolute;bottom:30px;left:22px;width:172px;height:172px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);touch-action:none;user-select:none;-webkit-user-select:none;}
   #padNub{position:absolute;left:50%;top:50%;width:66px;height:66px;border-radius:50%;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);transform:translate(-50%,-50%);pointer-events:none;display:flex;align-items:center;justify-content:center;color:#dfe6f0;font-size:11px;}
   #padHints{position:absolute;inset:0;pointer-events:none;color:#7f8a9c;font-size:12px;}
   #padHints span{position:absolute;left:50%;top:50%;}
@@ -22,12 +22,12 @@
 <canvas id="c"></canvas>
 <div id="edge"></div>
 <div id="hud">
-  face <b id="face">north</b> <span id="pips"></span><br>
+  face <b id="face">north</b> <span id="pips"></span> <span style="opacity:.45">v30</span><br>
   key <b id="key">no</b> &middot; deaths <b id="deaths">0</b><br>
   <span id="stat"></span>
 </div>
 <div id="msg"></div>
-<div id="help">slide the pad to move &middot; tap it to jump<br>walk into a block to climb it<br>keyboard: WASD + space &middot; R restarts</div>
+<div id="help">slide the pad to move<br>red sentinels: never touch &mdash; drop on their heads, or shatter them frozen<br>keyboard: WASD &middot; R restarts</div>
 <div id="pad">
   <div id="padHints">
     <span style="transform:translate(-50%,-78px)">in</span>
@@ -35,33 +35,24 @@
     <span style="transform:translate(-80px,-50%)">&#9664;</span>
     <span style="transform:translate(64px,-50%)">&#9654;</span>
   </div>
-  <div id="padNub">JUMP</div>
+  <div id="padNub"></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ---------- voxel level ----------
 // LAYERS[y][z] is a 6-char string indexed by x. Footprint 6x6, lava core at x 2-3, z 2-3 (auto).
-const LAYERS = [
- ["######","######","######","######","######","######"], // y0 base
- ["......","......","......","......","......","....#."], // y1
- ["......","......","......","......","....#.",".....#"], // y2
- ["...###","....##","....##","....##",".....#","......"], // y3 plaza + south dead-end
- ["...K..","......",".....F","......","....#.","......"], // y4 stone S1
- ["......","......","......","......","...#..",".#####"], // y5 catwalk + stone S2
- ["......","......","......","......",".#....","#C.D.."], // y6 step, crank, door, high stone
- ["......",".....#",".....#",".....#","......","......"], // y7 RING: bridge parked on east
- ["......","......","......","......","..#...","......"], // y8 riser
- ["......","......","......","#.....","##....","......"], // y9
- ["......","......","......","G.....","......","......"]  // y10 goal
-];
-const W = 6, ROWS = LAYERS.length, RING = 7, CX = W / 2;
+const LAYERS = [["######", "######", "######", "######", "######", "######"], ["######", "######", "##..##", "##..##", "######", "######"], ["######", "######", "##..##", "##..##", "######", "..####"], ["######", "######", "##..##", "##..##", "######", "....##"], ["######", "######", "##..##", "##..##", "######", "......"], ["######", "######", "##..##", "##..#.", "#####.", "##...."], ["######", "#####.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "^####.", "^#..#.", "##..#.", "#####.", "######"], ["##E...", ".#.L#.", ".#..#.", "##..##", "######", "######"], ["......", "....##", ".#..##", "##..##", "######", "######"], ["....##", "....##", ".#..##", "##..##", "######", "######"], ["..####", "..####", ".#..##", ".#..##", ".#####", "######"], ["######", ".#####", ".#..##", ".#..##", "..####", "..####"], ["######", "######", "##..##", ".#..##", "..####", "....##"], ["######", "######", "##..##", "##..##", "#.####", "....F."], ["######", "######", "##..##", "##..#E", "#####.", "##...."], ["######", "#####.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "#####.", "##..#.", "##..#.", "#####.", "######"], ["##....", "####..", "##..#.", "##..##", "######", "######"], ["......", "####.#", "##..##", "##..##", "######", "######"], ["....##", ".^##.#", ".K..##", "##..##", "######", "######"], ["..####", "..####", "....##", ".#..##", "D#####", ".#####"], ["######", "..####", "....##", ".#..##", "######", "..####"], ["######", "######", "##..##", ".#..##", "######", "....##"], ["######", "######", "##..##", "##..##", "######", "......"], ["######", "######", "##..##", "##..#.", "#####.", "##...."], ["######", "#####.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "####L.", "##..#.", "##..#.", "#####.", "######"], ["##....", "####..", "##..#.", "##..##", "######", "######"], ["......", "#C##.#", "##..##", "##..##", "######", "######"], ["##..##", "######", "....##", ".#..#.", "...#..", "...#.."], ["..####", "..####", "....##", "....##", ".#####", "######"], ["######", "######", "....##", "....##", "..####", "..####"], ["######", "######", "##..##", "....##", "...###", "..#E##"], ["####^^", "######", "##..##", "##..##", "#...##", "..#..."], ["####..", "######", "##..##", "##..#.", "#...#.", "###..."], ["####..", "#####.", "##..#.", "##..#.", "###.#.", "####.."], ["####..", "#####.", "##..#.", "##..#.", "#####.", "######"], ["##....", "##.^#.", "##..#.", "##..##", "######", "######"], ["......", "##..##", "##..##", "##..##", "######", "######"], ["....##", "....##", "E#..##", "##..##", "######", "######"], ["..####", "..####", "....##", "....##", "^F#K.#", "######"], ["######", "..####", "....##", "....##", "..#...", "..####"], ["######", "#####.", "#...#D", "....#.", "..#...", "....##"], ["#####.", "#####.", "##..##", "##..#.", "###...", "......"], ["####..", "#####.", "##..##", "##..#.", "###..#", "##...."], ["###...", "#####.", "##..#.", "##..##", "######", "####.."], ["##....", "#####.", "##..#.", "##..##", "######", "######"], ["#.....", "#####.", "##..#.", "##..##", "######", "######"], ["......", "######", "##..##", "##..##", "######", "######"], ["..#.##", ".#####", ".#..##", "##..##", "######", "######"], [".#####", ".#####", ".#..##", ".L..##", ".#####", "######"], ["####..", ".#####", ".#..##", "....##", ".##.#.", "......"], ["######", "#.####", "##..##", "....##", ".C####", "....##"], ["######", "#.FE##", "##..##", "##..##", "#.####", "......"], ["##^^##", "#....#", "##..##", "##..#.", "#.###.", "##...."], ["##..##", "##....", "##..#.", "##..#.", "#####.", "####.."], ["##....", "####..", "##..#.", "##..#.", "#####.", "######"], ["##....", "#####.", "##..#.", "##..##", "######", "######"], ["......", "######", "##..##", "##..##", "######", "######"], ["....##", ".#####", ".#..##", "##..##", "######", "######"], ["..####", ".#####", ".#..##", ".#..##", ".#####", "######"], ["######", ".#####", ".#..##", ".#..##", ".#####", "..####"], ["######", "######", "##..##", ".#..##", ".#####", "....##"], ["######", "######", "##..##", "##..##", "######", "......"], ["######", "######", "##..##", "##....", "####..", "##...."], ["######", "######", "##..#.", "##....", "####..", "####.."], ["#####E", "####.#", "##....", "##....", "####..", "######"], ["##....", "####.#", "##....", "##..##", "######", "######"], ["......", "####.#", "##...#", "##..##", "######", "######"], [".....#", ".^####", ".K..##", "##..##", "######", "######"], ["..####", "..####", "....##", ".#..##", "D#####", ".#####"], ["######", "..##.#", "....##", ".#..##", "######", "..####"], ["######", "####.#", "##..##", ".#..##", "######", "....##"], ["######", "####.#", "##..##", "##..##", "######", "......"], ["######", "######", "##..##", "##..#.", "#####.", "##...."], ["######", "####C.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "####..", "##..#.", "##..#.", "#####.", "######"], ["...##.", "..##..", "....#.", "....##", "##..##", "#...##"], ["...#..", "######", "##..##", "##..##", "######", "######"], ["..####", ".#####", ".L..##", "##..##", "######", "######"], ["..####", ".#####", "....##", ".#..##", ".#####", "######"], ["######", ".#####", "....##", ".#..##", ".#####", "..####"], ["######", "######", "##..##", ".#..##", ".#####", "....##"], ["####^^", "######", "##..##", "##..##", "######", "......"], ["####..", "######", "##..##", "##..#.", "#####.", "##...."], ["####..", "#####.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "#####.", "##..#.", "##..#.", "#####.", "######"], ["##....", "#####.", "##..#.", "##..##", "######", "######"], ["......", "######", "##..##", "##..##", "######", "######"], ["....##", ".#####", ".#..##", "##..##", "######", "######"], ["..####", ".#####", ".#..##", ".#..##", ".#####", "######"], ["######", ".#####", ".#..##", ".#..##", ".#####", "..####"], ["######", "######", "##..##", ".#..##", ".#####", "....##"], ["######", "######", "##..##", "##..##", "######", "....G."], ["######", "######", "##..##", "##..##", "#####.", "##...."], ["######", "######", "##..##", "##..##", "#####.", "####.."], ["######", "######", "##..##", "##..##", "#####.", "######"]];
+const BRIDGES = [{"lever": [3, 1, 8], "cells": [[0, 1, 9], [0, 2, 9]]}, {"lever": [4, 1, 27], "cells": [[5, 0, 36], [4, 0, 36]]}, {"lever": [1, 3, 51], "cells": [[3, 0, 57], [2, 0, 57]]}, {"lever": [1, 2, 80], "cells": [[5, 0, 86], [4, 0, 86]]}];
+const W = 6, ROWS = LAYERS.length, CX = W / 2;
+const RINGS = [30,52,78];
+const GATES = [{y:12,x:0,z:5},{y:24,x:4,z:5},{y:36,x:5,z:2},{y:48,x:1,z:0},{y:60,x:0,z:1},{y:72,x:0,z:5},{y:84,x:5,z:5}];
 const FACE_NAMES = ["north","east","south","west"];
-const RISE = 1 / 2.6;
+const RISE = 0.62;
 const ROLL_T = 0.15, CLIMB_T = 0.26, HOP_T = 0.24, FALL_T = 0.085;
 
-let vox, G, act, hasKey, frozen, camH, grace, won, deaths = 0, dirty, rotating = null, carried = false;
-let msgT = 0, lockMsgCd = 0, jumpBuf = 0, face = 0;
-const spawnCell = {x: 1, y: 1, z: 5};
+let vox, G, act, hasKey, frozen, camH, viewH = 2, grace, won, deaths = 0, dirty, rotating = null, carried = false, activeRing = null, gateIdx = 0, checkpoint = null;
+let msgT = 0, lockMsgCd = 0, face = 0, lastDir = null;
+const spawnCell = {x: 1, y: 2, z: 5};
 
 function buildVox(){ vox = LAYERS.map(layer => layer.map(s => s.split(''))); }
 function inB(x, z){ return x >= 0 && x < W && z >= 0 && z < W; }
@@ -72,70 +63,66 @@ function cellAt(x, y, z){
   if(y >= ROWS) return '.';
   return vox[y][z][x];
 }
-function isSolid(ch){ return ch === '#' || ch === 'D' || ch === '~'; }
+function isSolid(ch){ return ch === '#' || ch === '=' || ch === 'D' || ch === '~' || ch === 'E'; }
 function free(x, y, z){ return inB(x, z) && !isSolid(cellAt(x, y, z)); }
 
 function resetRun(full){
   buildVox();
+  gateIdx = 0; checkpoint = {x: spawnCell.x, y: spawnCell.y, z: spawnCell.z};
+  viewH = spawnCell.y;
+  activeRing = null;
   G = {x: spawnCell.x, y: spawnCell.y, z: spawnCell.z};
   act = null; hasKey = false; frozen = 0; won = false; rotating = null;
-  camH = G.y + 0.6; grace = full ? 5 : 3; face = 0;
+  camH = G.y + 0.6; grace = full ? 5 : 3; face = 0; lastDir = null;
   dirty = true;
   baseQ.set(0, 0, 0, 1);
   roller.quaternion.set(0, 0, 0, 1);
   player.position.copy(cellCenter(G.x, G.y, G.z));
-  if(full) showMsg("two ways up. mind the lava.");
+  if(full) showMsg("the gauntlet. every block counts.");
 }
 function showMsg(t){ const m = document.getElementById('msg'); m.textContent = t; m.style.opacity = 1; msgT = 3.2; }
 function die(reason){
   deaths++; document.getElementById('deaths').textContent = deaths;
-  resetRun(false);
-  showMsg(reason + " same layout, go again.");
+  G = {x: checkpoint.x, y: checkpoint.y, z: checkpoint.z};
+  act = null; rotating = null; activeRing = null; lastDir = null;
+  camH = G.y + 0.3; viewH = G.y; grace = 3;
+  baseQ.set(0, 0, 0, 1); roller.quaternion.set(0, 0, 0, 1);
+  player.position.copy(cellCenter(G.x, G.y, G.z));
+  showMsg(reason + " back to the last gate.");
 }
 
 // ---------- discrete movement ----------
 function startAct(type, tx, ty, tz, d){
   act = {type, fx: G.x, fy: G.y, fz: G.z, tx, ty, tz, t: 0,
-         dur: type === 'roll' ? ROLL_T : type === 'climb' ? CLIMB_T : type === 'hop' ? HOP_T : FALL_T,
+         dur: type === 'roll' ? ROLL_T : (type === 'climb' || type === 'down') ? CLIMB_T : type === 'hop' ? HOP_T : type === 'bounce' ? 0.18 : FALL_T,
          dx: d ? d.x : 0, dz: d ? d.z : 0};
 }
 function tryRoll(d){
   const tx = G.x + d.x, tz = G.z + d.z;
-  if(!inB(tx, tz)) return; // never out of bounds
+  if(!inB(tx, tz)) return;
   const ch = cellAt(tx, G.y, tz);
   if(ch === 'D'){
     if(hasKey){ vox[G.y][tz][tx] = '.'; hasKey = false; dirty = true; showMsg("unlocked"); }
     else if(lockMsgCd <= 0){ showMsg("locked. find the key."); lockMsgCd = 2; }
     return;
   }
-  if(ch === '#'){
-    // magnet: walking into a block swings you up onto it
-    if(free(tx, G.y + 1, tz) && free(G.x, G.y + 1, G.z)) startAct('climb', tx, G.y + 1, tz, d);
+  if(ch === 'E'){
+    if(frozen > 0){ vox[G.y][tz][tx] = '.'; dirty = true; showMsg("frozen solid. it shatters."); }
+    else die("touched a sentinel.");
     return;
   }
-  if(isSolid(ch)) return; // no magnet climb onto the lava core
-  startAct('roll', tx, G.y, tz, d);
-}
-function tryJump(d){
-  const X = G.x, Y = G.y, Z = G.z;
-  const tx = X + d.x, tz = Z + d.z, ux = X + 2*d.x, uz = Z + 2*d.z;
-  const adj = inB(tx, tz) ? cellAt(tx, Y, tz) : '#';
-  if(isSolid(adj)){
-    // climb onto the adjacent block (not onto a locked door)
-    if(adj !== 'D' && free(tx, Y+1, tz) && free(X, Y+1, Z)) startAct('climb', tx, Y+1, tz, d);
+  if(ch === '#' || ch === '='){
+    if(free(tx, G.y + 1, tz) && free(G.x, G.y + 1, G.z)){ lastDir = d; startAct('climb', tx, G.y + 1, tz, d); }
     return;
   }
-  if(!free(X, Y+1, Z)) return; // ceiling above
-  // leap up across a 1-gap onto a block one higher
-  if(inB(ux, uz) && cellAt(ux, Y, uz) === '#' && free(ux, Y+1, uz) && free(tx, Y+1, tz)){
-    startAct('hop', ux, Y+1, uz, d); return;
+  if(isSolid(ch)) return;
+  const b1 = cellAt(tx, G.y - 1, tz);
+  if(isSolid(b1)){
+    lastDir = d; startAct('roll', tx, G.y, tz, d);
+    return;
   }
-  // flat leap across a 1-gap (falls after if no support)
-  if(inB(ux, uz) && free(ux, Y, uz) && free(tx, Y+1, tz)){
-    startAct('hop', ux, Y, uz, d); return;
-  }
-  // small forward hop
-  if(free(tx, Y, tz)) startAct('hop', tx, Y, tz, d);
+  // edge: topple over, then land() chains cell-by-cell falls until something stops you
+  lastDir = d; startAct('down', tx, G.y - 1, tz, d);
 }
 function land(){
   if(act.type === 'roll' || act.type === 'climb' || act.type === 'down'){
@@ -150,10 +137,16 @@ function land(){
   const ch = cellAt(G.x, G.y, G.z);
   if(ch === 'K'){ vox[G.y][G.z][G.x] = '.'; hasKey = true; dirty = true; showMsg("key collected"); }
   else if(ch === 'F'){ vox[G.y][G.z][G.x] = '.'; frozen += 6; dirty = true; showMsg("time frozen 6s"); }
-  else if(ch === 'C'){ vox[G.y][G.z][G.x] = '.'; dirty = true; startRing(); return; }
   else if(ch === 'G'){ won = true; showMsg("section cleared. press R to run it again."); return; }
+  else if(ch === '^'){ die("impaled on the spikes."); return; }
   const below = cellAt(G.x, G.y - 1, G.z);
   if(below === '~'){ die("burned by the core."); return; }
+  if(below === 'E'){
+    vox[G.y - 1][G.z][G.x] = '.'; dirty = true;
+    showMsg("crushed it.");
+    startAct('fall', G.x, G.y - 1, G.z, null);
+    return;
+  }
   if(!isSolid(below)) startAct('fall', G.x, G.y - 1, G.z, null);
 }
 
@@ -162,9 +155,8 @@ function update(dt){
   if(won) return;
   if(grace > 0) grace -= dt;
   else if(frozen > 0) frozen -= dt;
-  else camH += RISE * dt;
+  else camH += (RISE + gateIdx * 0.07) * dt * (G.y - camH > 5 ? 4 : 1); // each gate passed, the line quickens
   if(lockMsgCd > 0) lockMsgCd -= dt;
-  if(jumpBuf > 0) jumpBuf -= dt;
 
   if(!rotating && !act){
     const RV = [[1,0],[0,-1],[-1,0],[0,1]][face]; // camera right
@@ -174,15 +166,22 @@ function update(dt){
     else if(keys['a'] || keys['arrowleft']) d = {x: -RV[0], z: -RV[1]};
     else if(keys['w'] || keys['arrowup']) d = {x: FV[0], z: FV[1]};
     else if(keys['s'] || keys['arrowdown']) d = {x: -FV[0], z: -FV[1]};
-    if(jumpBuf > 0 && d){ jumpBuf = 0; tryJump(d); }
-    else if(d) tryRoll(d);
+    if(d) tryRoll(d);
   }
 
   // face selection with hysteresis (corner cells keep the previous face)
   const dx = G.x + 0.5 - CX, dz = G.z + 0.5 - CX, ax = Math.abs(dx), az = Math.abs(dz);
   if(Math.abs(ax - az) > 0.35) face = az > ax ? (dz > 0 ? 0 : 2) : (dx > 0 ? 1 : 3);
 
-  if(G.y - 2.5 > camH) camH = G.y - 2.5;
+  if(gateIdx < GATES.length){
+    const g = GATES[gateIdx];
+    if(camH > g.y - 1.4) camH = g.y - 1.4;
+    if(G.y >= g.y){
+      checkpoint = {x: g.x, y: g.y, z: g.z}; gateIdx++;
+      camH = Math.max(camH, g.y - 1.6); // the line catches up to the gate you just passed
+      showMsg("checkpoint. the tower quickens.");
+    }
+  }
   if(G.y < camH - 6) die("dropped out of frame.");
 }
 
@@ -201,6 +200,56 @@ sun.position.set(6, 12, 8); scene.add(sun);
 const blocksGroup = new THREE.Group(), ringGroup = new THREE.Group();
 scene.add(blocksGroup); scene.add(ringGroup);
 const box = new THREE.BoxGeometry(1, 1, 1);
+const spikeGeo = new THREE.ConeGeometry(0.11, 0.4, 5);
+const dangerPlane = new THREE.Mesh(new THREE.PlaneGeometry(W + 8, W + 8),
+  new THREE.MeshBasicMaterial({color: 0xff3322, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false}));
+dangerPlane.rotation.x = -Math.PI / 2;
+scene.add(dangerPlane);
+// ---------- tunnel sense: nearby carved space shown faintly through the rock ----------
+const GHOST_COOL = new THREE.Color(0xaecdff), GHOST_HOT = new THREE.Color(0xff6a2a), GHOST_SPIKE = new THREE.Color(0xe05555);
+const ghostBox = new THREE.BoxGeometry(1, 1, 1); // full size: tiles seamlessly, no gaps
+const ghostGroup = new THREE.Group();
+const ghostPool = [];
+for(let n = 0; n < 125; n++){
+  const mat = new THREE.MeshBasicMaterial({transparent: true, opacity: 0,
+    depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending});
+  const m = new THREE.Mesh(ghostBox, mat);
+  m.visible = false; m.renderOrder = 9;
+  ghostPool.push(m); ghostGroup.add(m);
+}
+scene.add(ghostGroup);
+// FACE_OUT[face] = horizontal step from a cell outward (toward the camera / open air)
+const FACE_OUT = [[0, 1], [1, 0], [0, -1], [-1, 0]]; // faces: +z, +x, -z, -x
+// enclosed = the cell immediately outward is solid rock. open ledges face empty air -> not enclosed.
+function enclosedCell(x, y, z){
+  const o = FACE_OUT[face];
+  return isSolid(cellAt(x + o[0], y, z + o[1]));
+}
+let ghostFade = 0; // global: fades in only while YOU are inside a passage
+function updateGhosts(dt){
+  const target = enclosedCell(G.x, G.y, G.z) ? 1 : 0;
+  ghostFade += (target - ghostFade) * Math.min(1, dt * 7);
+  if(ghostFade < 0.02){ for(const m of ghostPool) m.visible = false; return; }
+  let n = 0;
+  const R = 2.6; // soft sphere radius around the cube
+  for(let dy = -2; dy <= 2; dy++) for(let dz = -2; dz <= 2; dz++) for(let dx = -2; dx <= 2; dx++){
+    const x = G.x + dx, y = G.y + dy, z = G.z + dz;
+    if(!inB(x, z) || y < 1 || y >= ROWS) continue;
+    const ch = cellAt(x, y, z);
+    if(isSolid(ch) && ch !== '~') continue;   // skip solids (lava still ghosts)
+    if(!enclosedCell(x, y, z)) continue;      // only reveal cells that are themselves inside
+    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+    const fall = 1 - dist / R;                 // smooth radial gradient, no distance tiers
+    if(fall <= 0) continue;
+    const peak = ch === '~' ? 0.32 : ch === '^' ? 0.34 : 0.26;
+    const m = ghostPool[n++];
+    m.visible = true;
+    m.material.color.copy(ch === '~' ? GHOST_HOT : ch === '^' ? GHOST_SPIKE : GHOST_COOL);
+    m.material.opacity = peak * fall * fall * ghostFade; // fade via opacity only
+    m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
+  }
+  for(; n < ghostPool.length; n++) ghostPool[n].visible = false;
+}
 const mats = {}, ghostsM = {};
 function mat(hex){ if(!mats[hex]) mats[hex] = new THREE.MeshLambertMaterial({color: hex}); return mats[hex]; }
 function ghost(hex){ if(!ghostsM[hex]) ghostsM[hex] = new THREE.MeshLambertMaterial({color: hex, transparent: true, opacity: 0.2, depthWrite: false}); return ghostsM[hex]; }
@@ -213,25 +262,33 @@ let spinners = [], cutList = [];
 function cellWorld(x, y, z){ return new THREE.Vector3(x + 0.5 - CX, y, z + 0.5 - CX); }
 function cellCenter(x, y, z){ return new THREE.Vector3(x + 0.5 - CX, y + 0.5, z + 0.5 - CX); }
 
+function exposedCell(x, y, z){
+  return !isSolid(cellAt(x+1,y,z)) || !isSolid(cellAt(x-1,y,z)) ||
+         !isSolid(cellAt(x,y,z+1)) || !isSolid(cellAt(x,y,z-1)) ||
+         !isSolid(cellAt(x,y+1,z)) || !isSolid(cellAt(x,y-1,z));
+}
 function rebuildBlocks(){
   [blocksGroup, ringGroup].forEach(g => { while(g.children.length) g.remove(g.children[0]); });
   ringGroup.rotation.y = 0;
   spinners = []; cutList = [];
   for(let y = 0; y < ROWS + 4; y++) for(let z = 0; z < W; z++) for(let x = 0; x < W; x++){
-    const grp = (y === RING) ? ringGroup : blocksGroup;
+    const grp = blocksGroup;
     if(y >= 1 && inCore(x, z)){
+      if(!exposedCell(x, y, z)) continue;
       const m = new THREE.Mesh(box, lavaMat);
       m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
       m.add(edgeLine(0x521b04));
+      m.userData.ly = y;
       grp.add(m); cutList.push({m, hex: null});
       continue;
     }
     if(y >= ROWS) continue;
     const ch = vox[y][z][x];
     if(ch === '.') continue;
+    if((ch === '#' || ch === '=') && !exposedCell(x, y, z)) continue;
     let m = null, hex = null;
-    if(ch === '#'){
-      hex = y === RING ? 0x8f7fd6 : ((x + z + y) % 2 ? 0x808a98 : 0x747e8c);
+    if(ch === '#' || ch === '='){
+      hex = ch === '=' ? 0xc09a62 : RINGS.includes(y) ? 0x8f7fd6 : ((x + z + y) % 2 ? 0x808a98 : 0x747e8c);
       m = new THREE.Mesh(box, mat(hex));
       m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
       m.add(edgeLine(0x10151d));
@@ -245,6 +302,37 @@ function rebuildBlocks(){
       lock.scale.set(0.2, 0.28, 1.06);
       m.add(lock);
       cutList.push({m, hex});
+    } else if(ch === '^'){
+      m = new THREE.Group();
+      for(const [ox, oz] of [[-0.24,-0.24],[0.24,-0.24],[-0.24,0.24],[0.24,0.24],[0,0]]){
+        const c = new THREE.Mesh(spikeGeo, mat(0x8e2b3a));
+        c.position.set(ox, 0.2, oz);
+        m.add(c);
+      }
+      m.position.set(x + 0.5 - CX, y, z + 0.5 - CX);
+    } else if(ch === 'E'){
+      m = new THREE.Mesh(box, mat(0xa32424));
+      m.scale.setScalar(0.94);
+      m.position.set(x + 0.5 - CX, y + 0.47, z + 0.5 - CX);
+      m.add(edgeLine(0x3d0a0a));
+      const eyeG = new THREE.BoxGeometry(0.13, 0.13, 0.05);
+      for(const ex of [-0.18, 0.18]){
+        for(const [rx, rz, ry] of [[0, 0.48, 0], [0, -0.48, Math.PI], [0.48, 0, Math.PI/2], [-0.48, 0, -Math.PI/2]]){
+          const eye = new THREE.Mesh(eyeG, mat(0xffd9d9));
+          eye.position.set(rx || ex, 0.12, rz || ex);
+          if(rx){ eye.rotation.y = ry; eye.position.z = ex; }
+          m.add(eye);
+        }
+      }
+      cutList.push({m, hex: 0xa32424});
+        } else if(ch === 'L'){
+      m = new THREE.Group();
+      const base = new THREE.Mesh(box, mat(0x3a4250)); base.scale.set(0.5, 0.14, 0.5); base.position.y = 0.07; m.add(base);
+      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.55, 6), mat(0xe8a33d));
+      handle.position.set(0.1, 0.32, 0); handle.rotation.z = -0.6; m.add(handle);
+      const knob = new THREE.Mesh(box, mat(0xd64545)); knob.scale.setScalar(0.14);
+      knob.position.set(0.245, 0.55, 0); m.add(knob);
+      m.position.set(x + 0.5 - CX, y, z + 0.5 - CX);
     } else {
       const col = ch === 'K' ? 0xf5c542 : ch === 'F' ? 0x4cc9f0 : ch === 'G' ? 0x4ade80 : 0xa78bfa;
       m = new THREE.Mesh(box, mat(col));
@@ -252,7 +340,7 @@ function rebuildBlocks(){
       m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
       if(ch !== 'C') spinners.push(m);
     }
-    if(m) grp.add(m);
+    if(m){ m.userData.ly = y; grp.add(m); }
   }
   dirty = false;
 }
@@ -285,15 +373,21 @@ roller.add(silhouette);
 
 // ---------- ring rotation ----------
 function startRing(){
-  carried = (G.y - 1 === RING);
+  const cy = G.y;
+  activeRing = RINGS.includes(cy - 1) ? cy - 1
+             : RINGS.reduce((a, b) => Math.abs(b - cy) < Math.abs(a - cy) ? b : a);
+  carried = (G.y - 1 === activeRing);
   rotating = {t: 0};
+  ringGroup.rotation.y = 0;
+  for(const m of [...blocksGroup.children]) if(m.userData.ly === activeRing) ringGroup.add(m);
   if(carried){ player.updateMatrixWorld(); ringGroup.add(player); }
-  showMsg("the slice turns...");
+  showMsg(carried ? "hold on. the slice turns..." : "somewhere, a slice turns...");
 }
 function finishRing(){
-  const old = vox[RING].map(r => r.slice());
+  const r = activeRing;
+  const old = vox[r].map(row => row.slice());
   for(let z = 0; z < W; z++) for(let x = 0; x < W; x++)
-    vox[RING][x][W - 1 - z] = old[z][x]; // cell (x,z) -> (W-1-z, x)
+    vox[r][x][W - 1 - z] = old[z][x];
   if(carried){
     const ox = G.x; G.x = W - 1 - G.z; G.z = ox;
     scene.add(player);
@@ -301,7 +395,7 @@ function finishRing(){
   let guard = 0;
   while(guard++ < 4 && isSolid(cellAt(G.x, G.y, G.z))) G.y++;
   player.position.copy(cellCenter(G.x, G.y, G.z));
-  rotating = null; dirty = true;
+  rotating = null; activeRing = null; dirty = true;
   const below = cellAt(G.x, G.y - 1, G.z);
   if(below === '~') die("burned by the core.");
   else if(!isSolid(below)) startAct('fall', G.x, G.y - 1, G.z, null);
@@ -311,7 +405,6 @@ function finishRing(){
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
-  if(k === ' '){ if(!e.repeat) jumpBuf = 0.18; }
   else keys[k] = true;
   if(k === 'r') resetRun(true);
 });
@@ -338,14 +431,13 @@ pad.addEventListener('pointermove', e => {
 });
 ['pointerup','pointercancel'].forEach(ev => pad.addEventListener(ev, e => {
   if(e.pointerId !== padPtr) return;
-  if(!padMoved) jumpBuf = 0.18;
   padPtr = null; padClear();
 }));
 
 // ---------- loop ----------
 resetRun(true);
 rebuildBlocks();
-let camA = 0, camDist = 12, last = performance.now();
+let camA = 0, camDist = 15, last = performance.now();
 function lerpAngle(a, b, t){
   let d = ((b - a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
   return a + d * t;
@@ -401,17 +493,30 @@ function frame(now){
     if(sy >= 0){ shadow.visible = true; shadow.position.set(player.position.x, sy + 0.02, player.position.z); }
     else shadow.visible = false;
   }
-  let targetA = face * Math.PI / 2;
-  if(rotating && carried) targetA += ringGroup.rotation.y;
+  // camera leans toward corners: square-on mid-face, 45deg on the corner cell
+  let targetA;
+  if(rotating && carried){
+    targetA = face * Math.PI / 2 + ringGroup.rotation.y;
+  } else {
+    const aBase = face * Math.PI / 2;
+    const lat = player.position.x * Math.cos(aBase) - player.position.z * Math.sin(aBase);
+    const axx = Math.abs(player.position.x), azz = Math.abs(player.position.z);
+    const ratio = Math.max(axx, azz) > 0.01 ? Math.min(axx, azz) / Math.max(axx, azz) : 0;
+    targetA = aBase + Math.sign(lat) * ratio * ratio * (Math.PI / 4);
+  }
   camA = lerpAngle(camA, targetA, Math.min(1, dt * 5));
-  camera.position.set(Math.sin(camA) * camDist, camH + camDist * 0.55, Math.cos(camA) * camDist);
-  camera.lookAt(0, camH + 0.2, 0);
+  updateGhosts(dt);
+  viewH += (Math.max(G.y, camH - 2) + 0.6 - viewH) * Math.min(1, dt * 4.5);
+  camera.position.set(Math.sin(camA) * camDist, viewH + camDist * 0.55, Math.cos(camA) * camDist);
+  camera.lookAt(0, viewH + 0.2, 0);
+  dangerPlane.position.y = camH - 5.0;
+  dangerPlane.material.opacity = 0.2 + 0.13 * (0.5 + 0.5 * Math.sin(performance.now() / 240));
 
   document.getElementById('face').textContent = FACE_NAMES[face];
   document.getElementById('pips').textContent = FACE_NAMES.map((_, i) => i === face ? '\u25CF' : '\u25CB').join('');
   document.getElementById('key').textContent = hasKey ? 'yes' : 'no';
   document.getElementById('stat').textContent =
-    won ? 'cleared' : grace > 0 ? 'camera rises in ' + Math.ceil(grace) + 's' : frozen > 0 ? 'time frozen ' + Math.ceil(frozen) + 's' : 'camera is rising';
+    won ? 'cleared' : 'act ' + Math.min(gateIdx + 1, GATES.length + 1) + '/' + (GATES.length + 1) + ' - ' + (grace > 0 ? 'camera rises in ' + Math.ceil(grace) + 's' : frozen > 0 ? 'time frozen ' + Math.ceil(frozen) + 's' : 'camera is rising');
   if(msgT > 0){ msgT -= dt; if(msgT <= 0) document.getElementById('msg').style.opacity = 0; }
 
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -419,7 +524,7 @@ function frame(now){
     renderer.setSize(w, h, false);
     camera.aspect = w / h; camera.updateProjectionMatrix();
     const halfH = Math.atan(Math.tan(camera.fov * Math.PI / 360) * camera.aspect);
-    camDist = Math.max(10, 4.8 / Math.tan(halfH));
+    camDist = Math.max(12.5, 6.0 / Math.tan(halfH));
   }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
