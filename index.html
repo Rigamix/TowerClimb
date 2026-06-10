@@ -138,9 +138,9 @@ function tryJump(d){
   if(free(tx, Y, tz)) startAct('hop', tx, Y, tz, d);
 }
 function land(){
-  if(act.type === 'roll' || act.type === 'climb'){
+  if(act.type === 'roll' || act.type === 'climb' || act.type === 'down'){
     const axis = new THREE.Vector3(act.dz, 0, -act.dx).normalize();
-    const q = new THREE.Quaternion().setFromAxisAngle(axis, act.type === 'climb' ? Math.PI : Math.PI / 2);
+    const q = new THREE.Quaternion().setFromAxisAngle(axis, act.type === 'roll' ? Math.PI / 2 : Math.PI);
     baseQ.premultiply(q).normalize();
   }
   G.x = act.tx; G.y = act.ty; G.z = act.tz;
@@ -359,15 +359,18 @@ function frame(now){
     act.t += dt;
     const k = Math.min(act.t / act.dur, 1);
     const cf = cellCenter(act.fx, act.fy, act.fz), ct = cellCenter(act.tx, act.ty, act.tz);
-    if(act.type === 'roll' || act.type === 'climb'){
-      // roll: 90deg about the shared bottom edge. climb: 180deg magnet swing about the block's top edge
+    if(act.type === 'roll' || act.type === 'climb' || act.type === 'down'){
+      // roll: 90deg bottom edge. climb: 180deg up over the block edge. down: 180deg down around the ledge edge
       const py = act.type === 'climb' ? cf.y + 0.5 : cf.y - 0.5;
       const pivot = new THREE.Vector3((cf.x + ct.x) / 2, py, (cf.z + ct.z) / 2);
       const axis = new THREE.Vector3(act.dz, 0, -act.dx).normalize();
-      const q = new THREE.Quaternion().setFromAxisAngle(axis, k * (act.type === 'climb' ? Math.PI : Math.PI / 2));
+      const q = new THREE.Quaternion().setFromAxisAngle(axis, k * (act.type === 'roll' ? Math.PI / 2 : Math.PI));
       const off = cf.clone().sub(pivot).applyQuaternion(q);
       player.position.copy(pivot.add(off));
       roller.quaternion.copy(q).multiply(baseQ);
+    } else if(act.type === 'bounce'){
+      const p = cf.clone(); p.y += Math.sin(Math.PI * k) * 0.32;
+      player.position.copy(p);
     } else {
       const p = cf.clone().lerp(ct, k);
       if(act.type === 'hop') p.y += Math.sin(Math.PI * k) * 0.55;
