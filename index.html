@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Tower prototype v41</title>
+<title>Tower prototype v42</title>
 <style>
-  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#10141d;font-family:ui-monospace,Menlo,Consolas,monospace;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#10141d;font-family:ui-monospace,Menlo,Consolas,monospace;touch-action:none;overscroll-behavior:none;}
+  *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;}
   #c{display:block;width:100%;height:100%;}
   #hud{position:absolute;top:10px;left:12px;color:#cdd6e4;font-size:13px;line-height:1.7;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,.6);}
   #hud b{color:#fff;font-weight:600;}
@@ -19,7 +20,7 @@
 <canvas id="c"></canvas>
 <div id="edge"></div>
 <div id="hud">
-  face <b id="face">north</b> <span id="pips"></span> <span style="opacity:.45">v41</span><br>
+  face <b id="face">north</b> <span id="pips"></span> <span style="opacity:.45">v42</span><br>
   key <b id="key">no</b> &middot; deaths <b id="deaths">0</b><br>
   <span id="stat"></span>
 </div>
@@ -648,6 +649,8 @@ addEventListener('keydown', e => {
   if(k === 'r') resetRun(true);
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+addEventListener('contextmenu', e => e.preventDefault());
+addEventListener('selectstart', e => e.preventDefault());
 addEventListener('keydown', e => {
   if(e.key.toLowerCase() === 'p'){
     paused = !paused;
