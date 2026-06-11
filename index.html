@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Tower prototype v40</title>
+<title>Tower prototype v41</title>
 <style>
   html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#10141d;font-family:ui-monospace,Menlo,Consolas,monospace;}
   #c{display:block;width:100%;height:100%;}
@@ -19,7 +19,7 @@
 <canvas id="c"></canvas>
 <div id="edge"></div>
 <div id="hud">
-  face <b id="face">north</b> <span id="pips"></span> <span style="opacity:.45">v40</span><br>
+  face <b id="face">north</b> <span id="pips"></span> <span style="opacity:.45">v41</span><br>
   key <b id="key">no</b> &middot; deaths <b id="deaths">0</b><br>
   <span id="stat"></span>
 </div>
@@ -44,7 +44,7 @@ const ROLL_T = 0.15, CLIMB_T = 0.26, HOP_T = 0.24, FALL_T = 0.085;
 
 let vox, G, act, hasKey, frozen, snapVox = null, snapKey = false, snapOn = [], coins = 0, snapCoins = 0, crumbleSeen = false, patState = PATROLS.map(() => ({k: 0, dir: 1, t: 0})), boostT = 0, coolT = 0, flow = 0, camH, viewH = 2, grace, won, deaths = 0, dirty, rotating = null, carried = false, activeRing = null, gateIdx = 0, checkpoint = null;
 let msgT = 0, lockMsgCd = 0, face = 0, lastDir = null, pcol = 0;
-let airV = null, airLat = false, hangSteps = 0, airDrift = 0, paused = false;
+let airV = null, airLat = false, hangSteps = 0, airDrift = 0, paused = false, padFwd = null, padBack = null;
 const PCOLS = [null, 0xe1493f, 0x3f7fe1];
 function setPcol(c){
   if(pcol === c) return;
@@ -117,6 +117,29 @@ function startAct(type, tx, ty, tz, d){
          dur: type === 'roll' ? ROLL_T : (type === 'climb' || type === 'down') ? CLIMB_T : type === 'hop' ? HOP_T : type === 'bounce' ? 0.18 : FALL_T,
          dx: d ? d.x : 0, dz: d ? d.z : 0};
 }
+function ringDir(x, z, fwd){
+  x = Math.max(0, Math.min(5, x)); z = Math.max(0, Math.min(5, z));
+  if(fwd){
+    if(z === 5 && x < 5) return [1, 0];
+    if(x === 5 && z > 0) return [0, -1];
+    if(z === 0 && x > 0) return [-1, 0];
+    return [0, 1];
+  }
+  if(z === 5 && x > 0) return [-1, 0];
+  if(x === 5 && z < 5) return [0, 1];
+  if(z === 0 && x < 5) return [1, 0];
+  return [0, -1];
+}
+function inputDir(){
+  if(keys['fwd'] || keys['back']){
+    const d = ringDir(G.x, G.z, !!keys['fwd']);
+    return {x: d[0], z: d[1]};
+  }
+  const lat = (keys['d'] || keys['arrowright']) ? 1 : (keys['a'] || keys['arrowleft']) ? -1 : 0;
+  if(!lat) return null;
+  const rv = [[1,0],[0,-1],[-1,0],[0,1]][face];
+  return {x: lat * rv[0], z: lat * rv[1]};
+}
 function latTry(sign){
   const rv = [[1,0],[0,-1],[-1,0],[0,1]];
   let v = rv[face];
@@ -167,11 +190,10 @@ function tryRoll(d){
   lastDir = d; startAct('down', tx, G.y - 1, tz, d);
 }
 function airStep(){
-  const rv = [[1,0],[0,-1],[-1,0],[0,1]][face];
-  const lat = (keys['d'] || keys['arrowright']) ? 1 : (keys['a'] || keys['arrowleft']) ? -1 : 0;
-  if(lat && !airLat){
-    airDrift = lat;                                   // momentum arms even against a wall
-    const tx = G.x + lat * rv[0], tz = G.z + lat * rv[1];
+  const idir = inputDir();
+  if(idir && !airLat){
+    airDrift = {x: idir.x, z: idir.z};                // momentum arms even against a wall
+    const tx = G.x + idir.x, tz = G.z + idir.z;
     if(inB(tx, tz)){
       const ch = cellAt(tx, G.y, tz);
       if(ch === 'E' || ch === 'R' || ch === 'U'){ die("clipped it mid-air."); return 'dead'; }
@@ -199,7 +221,7 @@ function airStep(){
     if(b0 !== '^' && isSolid(b0)){ airV = null; airLat = false; airDrift = 0; return 'down'; }
   }
   if(airDrift && !airLat){
-    const tx = G.x + airDrift * rv[0], tz = G.z + airDrift * rv[1];
+    const tx = G.x + airDrift.x, tz = G.z + airDrift.z;
     const ch = inB(tx, tz) ? cellAt(tx, G.y, tz) : '#';
     if(ch !== 'E' && ch !== 'R' && ch !== 'U' && ch !== '^' && !isSolid(ch)){
       airLat = true;
@@ -351,8 +373,12 @@ function update(dt){
   if(!rotating && !act){
     const RV = [[1,0],[0,-1],[-1,0],[0,1]][face]; // camera right
     const FV = [[0,-1],[-1,0],[0,1],[1,0]][face]; // into the screen
-    const lat = (keys['d'] || keys['arrowright']) ? 1 : (keys['a'] || keys['arrowleft']) ? -1 : 0;
-    if(lat) latTry(lat);
+    if(keys['fwd'] || keys['back']){
+      tryRoll(inputDir());
+    } else {
+      const lat = (keys['d'] || keys['arrowright']) ? 1 : (keys['a'] || keys['arrowleft']) ? -1 : 0;
+      if(lat) latTry(lat);
+    }
   }
 
   // face selection with hysteresis (corner cells keep the previous face)
@@ -642,6 +668,21 @@ const ch2 = document.createElement('div');
 ch2.id = 'coinhud';
 ch2.style.cssText = 'position:fixed;top:12px;right:58px;height:38px;display:flex;align-items:center;padding:0 12px;background:#1f2940cc;color:#ffd34d;border:1px solid #3a4a6a;border-radius:9px;font-size:14px;z-index:30;user-select:none;font-family:inherit;';
 document.body.appendChild(ch2);
+const pad = document.createElement('div');
+pad.id = 'dpad';
+pad.style.cssText = 'position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:14px;z-index:30;user-select:none;';
+function mkBtn(txt, key){
+  const b = document.createElement('div');
+  b.textContent = txt;
+  b.style.cssText = 'width:64px;height:64px;display:flex;align-items:center;justify-content:center;background:#1f2940aa;color:#cfe0ff;border:1px solid #3a4a6a;border-radius:14px;font-size:28px;cursor:pointer;touch-action:none;';
+  b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); keys[key] = true; });
+  const off = () => { keys[key] = false; };
+  b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('pointerleave', off);
+  pad.appendChild(b); return b;
+}
+padBack = mkBtn('\u2039', 'back');
+padFwd  = mkBtn('\u203A', 'fwd');
+document.body.appendChild(pad);
 }
 function updateCoinHud(){
   const el = (typeof document.getElementById === 'function') ? document.getElementById('coinhud') : null;
@@ -650,7 +691,7 @@ function updateCoinHud(){
 updateCoinHud();
 // lateral touch: hold either half of the screen
 let touchPtr = null;
-function setTouch(x){ keys['a'] = keys['d'] = false; if(x !== null) keys[x > innerWidth / 2 ? 'd' : 'a'] = true; }
+function setTouch(x){ keys['fwd'] = keys['back'] = false; if(x !== null) keys[x > innerWidth / 2 ? 'fwd' : 'back'] = true; }
 canvas.addEventListener('pointerdown', e => { e.preventDefault(); touchPtr = e.pointerId; setTouch(e.clientX); });
 canvas.addEventListener('pointermove', e => { if(e.pointerId === touchPtr) setTouch(e.clientX); });
 ['pointerup','pointercancel'].forEach(ev => addEventListener(ev, e => {
@@ -686,6 +727,10 @@ function lerpAngle(a, b, t){
 }
 function frame(now){
   if(paused){ last = now; renderer.render(scene, camera); requestAnimationFrame(frame); return; }
+  if(padFwd){
+    padFwd.style.background  = keys['fwd']  ? '#3a78d9cc' : '#1f2940aa';
+    padBack.style.background = keys['back'] ? '#3a78d9cc' : '#1f2940aa';
+  }
   const dt = Math.min((now - last) / 1000, 0.05); last = now;
   update(dt);
 
