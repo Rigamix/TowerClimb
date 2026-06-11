@@ -3,18 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Tower prototype v30</title>
+<title>Tower prototype v40</title>
 <style>
   html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#10141d;font-family:ui-monospace,Menlo,Consolas,monospace;}
   #c{display:block;width:100%;height:100%;}
   #hud{position:absolute;top:10px;left:12px;color:#cdd6e4;font-size:13px;line-height:1.7;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,.6);}
   #hud b{color:#fff;font-weight:600;}
+  #swatch{position:absolute;top:12px;right:14px;width:26px;height:26px;border-radius:6px;border:2px solid rgba(255,255,255,.35);background:#dfe6f0;}
   #msg{position:absolute;top:14%;left:50%;transform:translateX(-50%);color:#ffd97a;font-size:15px;text-align:center;pointer-events:none;opacity:0;transition:opacity .3s;text-shadow:0 1px 3px rgba(0,0,0,.8);max-width:90%;}
   #edge{position:absolute;left:0;right:0;bottom:0;height:12%;background:linear-gradient(to bottom,rgba(0,0,0,0),rgba(120,20,30,.55));pointer-events:none;}
-  #pad{position:absolute;bottom:30px;left:22px;width:172px;height:172px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);touch-action:none;user-select:none;-webkit-user-select:none;}
-  #padNub{position:absolute;left:50%;top:50%;width:66px;height:66px;border-radius:50%;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);transform:translate(-50%,-50%);pointer-events:none;display:flex;align-items:center;justify-content:center;color:#dfe6f0;font-size:11px;}
-  #padHints{position:absolute;inset:0;pointer-events:none;color:#7f8a9c;font-size:12px;}
-  #padHints span{position:absolute;left:50%;top:50%;}
   #help{position:absolute;top:10px;right:14px;color:#7b8698;font-size:11px;text-align:right;pointer-events:none;line-height:1.6;}
 </style>
 </head>
@@ -22,39 +19,48 @@
 <canvas id="c"></canvas>
 <div id="edge"></div>
 <div id="hud">
-  face <b id="face">north</b> <span id="pips"></span> <span style="opacity:.45">v30</span><br>
+  face <b id="face">north</b> <span id="pips"></span> <span style="opacity:.45">v40</span><br>
   key <b id="key">no</b> &middot; deaths <b id="deaths">0</b><br>
   <span id="stat"></span>
 </div>
 <div id="msg"></div>
-<div id="help">slide the pad to move<br>red sentinels: never touch &mdash; drop on their heads, or shatter them frozen<br>keyboard: WASD &middot; R restarts</div>
-<div id="pad">
-  <div id="padHints">
-    <span style="transform:translate(-50%,-78px)">in</span>
-    <span style="transform:translate(-50%,64px)">out</span>
-    <span style="transform:translate(-80px,-50%)">&#9664;</span>
-    <span style="transform:translate(64px,-50%)">&#9654;</span>
-  </div>
-  <div id="padNub"></div>
-</div>
+<div id="swatch"></div>
+<div id="help">hold a side of the screen to roll the tower<br>match the color to pass &middot; grey never forgives<br>keyboard: A/D or arrows &middot; R restarts</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ---------- voxel level ----------
 // LAYERS[y][z] is a 6-char string indexed by x. Footprint 6x6, lava core at x 2-3, z 2-3 (auto).
-const LAYERS = [["######", "######", "######", "######", "######", "######"], ["######", "######", "##..##", "##..##", "######", "######"], ["######", "######", "##..##", "##..##", "######", "..####"], ["######", "######", "##..##", "##..##", "######", "....##"], ["######", "######", "##..##", "##..##", "######", "......"], ["######", "######", "##..##", "##..#.", "#####.", "##...."], ["######", "#####.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "^####.", "^#..#.", "##..#.", "#####.", "######"], ["##E...", ".#.L#.", ".#..#.", "##..##", "######", "######"], ["......", "....##", ".#..##", "##..##", "######", "######"], ["....##", "....##", ".#..##", "##..##", "######", "######"], ["..####", "..####", ".#..##", ".#..##", ".#####", "######"], ["######", ".#####", ".#..##", ".#..##", "..####", "..####"], ["######", "######", "##..##", ".#..##", "..####", "....##"], ["######", "######", "##..##", "##..##", "#.####", "....F."], ["######", "######", "##..##", "##..#E", "#####.", "##...."], ["######", "#####.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "#####.", "##..#.", "##..#.", "#####.", "######"], ["##....", "####..", "##..#.", "##..##", "######", "######"], ["......", "####.#", "##..##", "##..##", "######", "######"], ["....##", ".^##.#", ".K..##", "##..##", "######", "######"], ["..####", "..####", "....##", ".#..##", "D#####", ".#####"], ["######", "..####", "....##", ".#..##", "######", "..####"], ["######", "######", "##..##", ".#..##", "######", "....##"], ["######", "######", "##..##", "##..##", "######", "......"], ["######", "######", "##..##", "##..#.", "#####.", "##...."], ["######", "#####.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "####L.", "##..#.", "##..#.", "#####.", "######"], ["##....", "####..", "##..#.", "##..##", "######", "######"], ["......", "#C##.#", "##..##", "##..##", "######", "######"], ["##..##", "######", "....##", ".#..#.", "...#..", "...#.."], ["..####", "..####", "....##", "....##", ".#####", "######"], ["######", "######", "....##", "....##", "..####", "..####"], ["######", "######", "##..##", "....##", "...###", "..#E##"], ["####^^", "######", "##..##", "##..##", "#...##", "..#..."], ["####..", "######", "##..##", "##..#.", "#...#.", "###..."], ["####..", "#####.", "##..#.", "##..#.", "###.#.", "####.."], ["####..", "#####.", "##..#.", "##..#.", "#####.", "######"], ["##....", "##.^#.", "##..#.", "##..##", "######", "######"], ["......", "##..##", "##..##", "##..##", "######", "######"], ["....##", "....##", "E#..##", "##..##", "######", "######"], ["..####", "..####", "....##", "....##", "^F#K.#", "######"], ["######", "..####", "....##", "....##", "..#...", "..####"], ["######", "#####.", "#...#D", "....#.", "..#...", "....##"], ["#####.", "#####.", "##..##", "##..#.", "###...", "......"], ["####..", "#####.", "##..##", "##..#.", "###..#", "##...."], ["###...", "#####.", "##..#.", "##..##", "######", "####.."], ["##....", "#####.", "##..#.", "##..##", "######", "######"], ["#.....", "#####.", "##..#.", "##..##", "######", "######"], ["......", "######", "##..##", "##..##", "######", "######"], ["..#.##", ".#####", ".#..##", "##..##", "######", "######"], [".#####", ".#####", ".#..##", ".L..##", ".#####", "######"], ["####..", ".#####", ".#..##", "....##", ".##.#.", "......"], ["######", "#.####", "##..##", "....##", ".C####", "....##"], ["######", "#.FE##", "##..##", "##..##", "#.####", "......"], ["##^^##", "#....#", "##..##", "##..#.", "#.###.", "##...."], ["##..##", "##....", "##..#.", "##..#.", "#####.", "####.."], ["##....", "####..", "##..#.", "##..#.", "#####.", "######"], ["##....", "#####.", "##..#.", "##..##", "######", "######"], ["......", "######", "##..##", "##..##", "######", "######"], ["....##", ".#####", ".#..##", "##..##", "######", "######"], ["..####", ".#####", ".#..##", ".#..##", ".#####", "######"], ["######", ".#####", ".#..##", ".#..##", ".#####", "..####"], ["######", "######", "##..##", ".#..##", ".#####", "....##"], ["######", "######", "##..##", "##..##", "######", "......"], ["######", "######", "##..##", "##....", "####..", "##...."], ["######", "######", "##..#.", "##....", "####..", "####.."], ["#####E", "####.#", "##....", "##....", "####..", "######"], ["##....", "####.#", "##....", "##..##", "######", "######"], ["......", "####.#", "##...#", "##..##", "######", "######"], [".....#", ".^####", ".K..##", "##..##", "######", "######"], ["..####", "..####", "....##", ".#..##", "D#####", ".#####"], ["######", "..##.#", "....##", ".#..##", "######", "..####"], ["######", "####.#", "##..##", ".#..##", "######", "....##"], ["######", "####.#", "##..##", "##..##", "######", "......"], ["######", "######", "##..##", "##..#.", "#####.", "##...."], ["######", "####C.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "####..", "##..#.", "##..#.", "#####.", "######"], ["...##.", "..##..", "....#.", "....##", "##..##", "#...##"], ["...#..", "######", "##..##", "##..##", "######", "######"], ["..####", ".#####", ".L..##", "##..##", "######", "######"], ["..####", ".#####", "....##", ".#..##", ".#####", "######"], ["######", ".#####", "....##", ".#..##", ".#####", "..####"], ["######", "######", "##..##", ".#..##", ".#####", "....##"], ["####^^", "######", "##..##", "##..##", "######", "......"], ["####..", "######", "##..##", "##..#.", "#####.", "##...."], ["####..", "#####.", "##..#.", "##..#.", "#####.", "####.."], ["####..", "#####.", "##..#.", "##..#.", "#####.", "######"], ["##....", "#####.", "##..#.", "##..##", "######", "######"], ["......", "######", "##..##", "##..##", "######", "######"], ["....##", ".#####", ".#..##", "##..##", "######", "######"], ["..####", ".#####", ".#..##", ".#..##", ".#####", "######"], ["######", ".#####", ".#..##", ".#..##", ".#####", "..####"], ["######", "######", "##..##", ".#..##", ".#####", "....##"], ["######", "######", "##..##", "##..##", "######", "....G."], ["######", "######", "##..##", "##..##", "#####.", "##...."], ["######", "######", "##..##", "##..##", "#####.", "####.."], ["######", "######", "##..##", "##..##", "#####.", "######"]];
-const BRIDGES = [{"lever": [3, 1, 8], "cells": [[0, 1, 9], [0, 2, 9]]}, {"lever": [4, 1, 27], "cells": [[5, 0, 36], [4, 0, 36]]}, {"lever": [1, 3, 51], "cells": [[3, 0, 57], [2, 0, 57]]}, {"lever": [1, 2, 80], "cells": [[5, 0, 86], [4, 0, 86]]}];
+const LAYERS = [["######", "######", "######", "######", "######", "######"], ["######", "######", "##..##", "##..##", "######", "######"], ["######", "######", "##..##", "##..##", "######", ".#####"], ["######", "######", "##..##", "##..##", "######", "..####"], ["######", "######", "##..##", "##..##", "######", "...###"], ["######", "######", "##..##", "##..##", "######", "#...##"], ["###^##", "######", "##..##", "##..##", "######", "##...#"], ["##^...", "#####.", "##..#.", "##..#J", "#####.", "###..."], ["##....", "#####.", "##..#.", "##..#.", "#####.", "####.."], ["##....", "######", "##..##", "##..#o", "######", "#####."], ["#...#.", "######", "##..##", "##..#.", "######", "######"], ["...##.", "#####.", "##..#L", "##..#.", "######", "######"], ["..###.", ".####.", "##..#.", "##..#.", "######", "######"], [".#####", ".#####", ".#..##", "##..##", "######", "######"], ["######", ".#####", ".#..#.", ".#..#n", ".####.", "..J..D"], ["######", "#####.", ".#..#.", ".#..##", ".####.", ".....#"], ["...J..", "#####.", "##..#.", ".#..##", "######", "##.###"], ["......", ".####.", "##..##", "##..##", "######", "#K.u##"], [".##.#.", ".#####", ".#..##", "##..##", "######", "#.^.##"], ["###.##", ".#####", ".#..##", ".#..##", "######", "######"], ["##g.##", "#####.", ".#..#.", ".#..#.", ".####.", "..J.m."], ["##..#.", "#####.", "##..#.", ".#..#.", ".####.", "....#."], ["####..", "#####.", "##..##", "##..##", ".#####", "##.##."], ["###...", "######", "##..##", "##..##", "######", "##.##."], ["##...#", "######", "##..##", "##..##", "######", "#o..o."], ["#...##", "######", "##..##", "##..##", "######", "#....."], ["...###", "######", "##..##", "##..##", "######", "######"], ["..####", ".#####", "##..##", "##..##", "######", "######"], [".#####", ".#####", ".#..##", "##..##", "######", "######"], ["#####.", ".####n", ".#..#.", ".#..#J", ".####.", ".r...."], ["####..", "######", ".#..#.", ".#..#.", ".####.", "......"], ["###...", "######", "##..##", ".#..#.", "#####.", "####.."], ["##...#", "######", "##..##", "##..#.", "#####c", "####cc"], ["#...##", "######", "##..##", "##..#.", "#####.", "####uo"], ["...###", "######", "##..##", "##..#.", "#####.", "####.."], ["..####", ".#####", "##..##", "##..##", "######", "######"], [".####.", ".####n", ".#..#.", ".#..#D", "r####.", ".J...."], ["####..", ".#####", ".#..#.", ".#..##", ".####.", "......"], ["###...", "######", ".#..##", "##..##", "######", "#.####"], ["##...#", "######", "##..##", "##..##", "######", "#.####"], ["#...##", "######", "##..##", "##..##", "######", "#.KDuK"], ["...###", "######", "##..##", "##..##", "######", "#..#.."], ["..####", ".#####", "##..##", "##..##", "######", "######"], [".#####", ".#####", ".#..##", "##..##", "######", "######"], ["######", ".#####", ".#..##", ".#..##", "######", "######"], ["######", "######", ".#..##", ".#..##", ".#####", ".J...#"], ["######", "######", "##..##", ".#..##", ".#####", "......"], ["######", "######", "##..##", "##..##", ".####.", "#.##.."], ["######", "######", "##..##", "##..#.", "#####.", "#.###."], ["######", "######", "##..#.", "##..#.", "#####.", "#.g###"], ["######", "#####.", "##..#.", "##..#.", "######", "#..###"], ["#####.", "#####.", "##..#.", "##..##", "######", "######"], ["####..", "#####.", "##..##", "##..#r", "#####J", "###LJ#"], ["###...", "######", "##..##", "##..#.", "#####.", "###..#"], ["##...#", "#####^", "##..#^", "##..##", "#####.", "####.#"], ["#...##", "#####.", "##..#.", "##..##", "#####.", "####.#"], ["...#.R", ".####.", ".#..#.", ".#..#.", ".####.", "......"], ["..#..#", ".####.", ".#..#.", ".#..#.", ".####.", "......"], [".#...#", "#####.", "##..#.", "##..##", "######", "######"], ["#...##", "######", "##..##", "##..##", "######", "######"], ["...###", "######", "##..##", "##..##", "######", "######"], ["..####", ".#####", "##..##", "##..##", "######", "######"], [".#####", ".#####", ".#..#.", ".#..#.", ".####.", ".J.A.."], ["######", ".####.", ".#..#.", ".#..#.", ".####.", "......"], ["...J..", "#####.", ".#..#.", "##..##", "######", "#.###."], ["......", ".####.", "##..##", "##..##", "######", "#.###."], [".##.#.", ".#####", ".#..##", "##..##", "######", "#...O."], ["###.##", ".#####", ".#..##", ".#..##", "######", "#....."], ["##g.##", "######", ".#..##", ".#..##", ".#####", "######"], ["##..#.", "#####.", "##..#.", ".#..#.", ".####.", "...J.n"], ["####..", "#####.", "##..#.", "##..#.", ".####.", ".....#"], ["###...", "######", "##..##", "##..##", "#####.", ".##.##"], ["##...#", "######", "##..##", "##..##", "#####.", "###.##"], ["#...##", "######", "##..##", "##..##", "#####.", "##o..o"], ["...###", "######", "##..##", "##..##", "#####.", "##...."], ["..####", ".#####", "##..##", "##..##", "######", "######"], [".#####", ".#####", ".#..##", "##..##", "######", "######"], ["####..", ".####m", ".#..#.", ".#..#.", ".####.", "uJ...."], ["###...", "######", ".#..#.", ".#..#.", ".####.", "......"], ["##...#", "######", "##..#.", ".#..##", "######", "#.####"], ["#...##", "######", "##..#.", "##..##", "######", "#.####"], ["...###", "######", "##..#.", "##..##", "######", "#.T###"], ["..####", ".#####", "##..#.", "##..#o", "#####r", "#..##."], [".#####", ".#####", ".#..#.", "##..#.", "#####.", "#####."], ["######", ".#####", ".#..##", ".#..##", "######", "######"], ["######", "######", ".#..##", ".#..##", ".#####", "######"], ["######", "######", "##..##", ".#..##", ".#####", ".#####"], ["###.n.", "#####.", "##..#.", "##..#.", ".####J", "...F.."], ["##..#.", "#####.", "##..#.", "##..#.", "#####.", "......"], ["#...#.", "######", "##..##", "##..##", "#####.", "#.####"], ["...##.", "######", "##..##", "##..##", "#####.", "######"], ["..###.", ".####u", "##..#E", "##..#.", "#####.", "######"], [".####.", ".####.", ".#..#.", "##..#.", "#####.", "######"], ["######", ".#####", ".#..##", ".#..##", "######", "######"], ["######", "######", ".#..##", ".#..##", ".#####", "######"], ["##Jr##", "######", "##..##", ".#..##", ".#####", ".#####"], ["##..##", "######", "##..##", "##..##", ".#####", "..####"], ["##o##^", "#####^", "##..##", "^#..##", "######", "...###"], ["##.##.", "#####.", "##..##", ".#..##", "######", "#...##"], ["......", "J####.", ".#..#n", ".#..#u", "m####L", ".#...."], ["......", ".####.", ".#..##", ".#..#.", "#####.", "..#..."], ["#####.", ".####.", "##..##", ".#..##", "######", "...#.#"], ["######", ".#####", "##..##", "##..##", "######", "#...##"], ["######", ".####.", "L#..#.", "##..#.", "#####J", "##...."], ["#####.", ".####.", ".#..#.", "##..#.", "#####.", "###..."], ["####..", "#####.", "##..##", "##..##", "#####.", "####.#"], ["###...", "######", "##..##", "##..##", "#####.", "######"], [".....#", "J#####", ".#..##", "n#..#g", ".####.", "....##"], ["....##", ".#####", ".#..##", "##..#.", ".####.", ".....#"], ["##.###", ".#####", "##..##", "##..##", ".#####", "###..."], ["######", ".#####", "##..##", "##..##", ".####.", "####.."], ["o#####", ".#####", ".#..##", "o#..#.", ".####.", "#####."], [".#####", ".#####", ".#..#.", ".#..#.", ".####.", "######"], ["######", "#####.", "##..#.", "##..#.", "######", "######"], ["#####.", "#####.", "##..#.", "##..##", "######", "######"], ["####..", "#####.", "##..##", "##..##", "######", "######"], [".u....", "J#####", ".#..##", ".#..##", ".#####", "######"], [".....#", ".#####", ".#..##", ".#..##", ".#####", ".#####"], ["###.##", "o#####", "##..##", "##..##", ".#####", "..####"], ["K#####", ".#####", "r#..##", "##..##", "######", "...###"], [".#####", "^#####", ".#..##", "##..##", "######", "#...##"], ["######", "######", "##..##", "##..##", "######", "##...#"], ["#####^", "^####^", "^#..##", "##..##", "######", "###..."], ["#####c", ".####c", ".#..##", "##..##", "#####.", "####.."], ["....J.", ".####.", ".#..#.", "D#..#.", "m####.", ".####."], ["......", ".####.", ".#..#.", "##..#.", "#####.", "..####"], [".###.#", ".#####", ".#..##", "##..#.", "######", "...###"], [".###.#", "######", "##..##", "##..##", "######", "#..G##"], [".L.T.#", "######", "##..##", "##..##", "######", "##...#"], [".....#", "######", "##..##", "##..##", "######", "###..."], ["######", "######", "##..##", "##..##", "######", "####.."], ["######", "######", "##..##", "##..##", "######", "#####."], ["######", "######", "##..##", "##..##", "######", "######"], ["######", "######", "##..##", "##..##", "######", "######"], ["######", "######", "##..##", "##..##", "######", "######"], ["######", "######", "##..##", "##..##", "######", "######"]];
+const BRIDGES = [{"lever": [5, 2, 11], "cells": [[3, 0, 7], [2, 0, 8]]}, {"lever": [3, 5, 52], "cells": [[5, 2, 55], [5, 1, 55], [5, 4, 55]]}, {"lever": [5, 4, 99], "cells": [[5, 1, 98], [5, 0, 98], [0, 3, 98], [2, 0, 98]], "levers2": [[0, 2, 103]]}, {"lever": [1, 0, 128], "cells": [[0, 1, 123], [0, 2, 123]]}];
 const W = 6, ROWS = LAYERS.length, CX = W / 2;
-const RINGS = [30,52,78];
-const GATES = [{y:12,x:0,z:5},{y:24,x:4,z:5},{y:36,x:5,z:2},{y:48,x:1,z:0},{y:60,x:0,z:1},{y:72,x:0,z:5},{y:84,x:5,z:5}];
+const RINGS = [];
+const GATES = [{"y": 20, "x": 2, "z": 0}, {"y": 49, "x": 2, "z": 5}, {"y": 68, "x": 2, "z": 0}, {"y": 107, "x": 5, "z": 3}];
+const COINS = {"cells": [[5, 3, 9], [1, 5, 24], [4, 5, 24], [5, 5, 33], [2, 5, 73], [5, 5, 73], [5, 3, 82], [2, 0, 97], [0, 0, 111], [0, 3, 111], [0, 1, 118]], "quota": 7, "optional": [[1, 5, 24], [4, 5, 24], [2, 5, 73], [5, 5, 73], [0, 0, 111], [0, 3, 111]]};
+const TELE = [{"src": [2, 5, 81], "dst": [5, 5, 82]}, {"src": [3, 0, 128], "dst": [2, 0, 128]}];
+const PATROLS = [{"cells": [[2, 5, 62], [3, 5, 62], [4, 5, 62]], "step": 1.15}];
 const FACE_NAMES = ["north","east","south","west"];
 const RISE = 0.62;
 const ROLL_T = 0.15, CLIMB_T = 0.26, HOP_T = 0.24, FALL_T = 0.085;
 
-let vox, G, act, hasKey, frozen, camH, viewH = 2, grace, won, deaths = 0, dirty, rotating = null, carried = false, activeRing = null, gateIdx = 0, checkpoint = null;
-let msgT = 0, lockMsgCd = 0, face = 0, lastDir = null;
-const spawnCell = {x: 1, y: 2, z: 5};
+let vox, G, act, hasKey, frozen, snapVox = null, snapKey = false, snapOn = [], coins = 0, snapCoins = 0, crumbleSeen = false, patState = PATROLS.map(() => ({k: 0, dir: 1, t: 0})), boostT = 0, coolT = 0, flow = 0, camH, viewH = 2, grace, won, deaths = 0, dirty, rotating = null, carried = false, activeRing = null, gateIdx = 0, checkpoint = null;
+let msgT = 0, lockMsgCd = 0, face = 0, lastDir = null, pcol = 0;
+let airV = null, airLat = false, hangSteps = 0, airDrift = 0, paused = false;
+const PCOLS = [null, 0xe1493f, 0x3f7fe1];
+function setPcol(c){
+  if(pcol === c) return;
+  pcol = c;
+  body.material.forEach((mm, i) => mm.color.setHex(c ? PCOLS[c] : faceTints[i]));
+  const sw = document.getElementById('swatch');
+  sw.style.background = c ? '#' + PCOLS[c].toString(16).padStart(6, '0') : '#dfe6f0';
+  if(c) showMsg(c === 1 ? "you are red now." : "you are blue now.");
+}
+const spawnCell = {x: 0, y: 2, z: 5};
 
-function buildVox(){ vox = LAYERS.map(layer => layer.map(s => s.split(''))); }
+function buildVox(){
+  vox = LAYERS.map(layer => layer.map(s => s.split('')));
+  for(const b of BRIDGES){ b.on = false; for(const c of (b.icells || [])) vox[c[2]][c[1]][c[0]] = '='; }
+}
+function snapshot(){ snapVox = vox.map(l => l.map(r => r.slice())); snapKey = hasKey; snapOn = BRIDGES.map(b => !!b.on); snapCoins = coins; }
 function inB(x, z){ return x >= 0 && x < W && z >= 0 && z < W; }
 function inCore(x, z){ return x >= 2 && x <= 3 && z >= 2 && z <= 3; }
 function cellAt(x, y, z){
@@ -63,7 +69,14 @@ function cellAt(x, y, z){
   if(y >= ROWS) return '.';
   return vox[y][z][x];
 }
-function isSolid(ch){ return ch === '#' || ch === '=' || ch === 'D' || ch === '~' || ch === 'E'; }
+function patAt(x, y, z){
+  for(let i = 0; i < PATROLS.length; i++){
+    const c = PATROLS[i].cells[patState[i].k];
+    if(c[0] === x && c[1] === z && c[2] === y) return i;
+  }
+  return -1;
+}
+function isSolid(ch){ return ch === '#' || ch === '=' || ch === 'D' || ch === '~' || ch === 'E' || ch === 'R' || ch === 'U' || ch === 'm' || ch === 'n' || ch === 'c'; }
 function free(x, y, z){ return inB(x, z) && !isSolid(cellAt(x, y, z)); }
 
 function resetRun(full){
@@ -72,8 +85,9 @@ function resetRun(full){
   viewH = spawnCell.y;
   activeRing = null;
   G = {x: spawnCell.x, y: spawnCell.y, z: spawnCell.z};
-  act = null; hasKey = false; frozen = 0; won = false; rotating = null;
-  camH = G.y + 0.6; grace = full ? 5 : 3; face = 0; lastDir = null;
+  act = null; hasKey = false; frozen = 0; won = false; rotating = null; coins = 0; updateCoinHud();
+  snapshot();
+  camH = G.y - 4; grace = 0; face = 0; lastDir = null; airV = null; airLat = false;
   dirty = true;
   baseQ.set(0, 0, 0, 1);
   roller.quaternion.set(0, 0, 0, 1);
@@ -84,31 +98,59 @@ function showMsg(t){ const m = document.getElementById('msg'); m.textContent = t
 function die(reason){
   deaths++; document.getElementById('deaths').textContent = deaths;
   G = {x: checkpoint.x, y: checkpoint.y, z: checkpoint.z};
-  act = null; rotating = null; activeRing = null; lastDir = null;
-  camH = G.y + 0.3; viewH = G.y; grace = 3;
+  act = null; rotating = null; activeRing = null; lastDir = null; airV = null; airLat = false;
+  camH = G.y - 3; viewH = G.y; grace = 0;
   baseQ.set(0, 0, 0, 1); roller.quaternion.set(0, 0, 0, 1);
   player.position.copy(cellCenter(G.x, G.y, G.z));
-  showMsg(reason + " back to the last gate.");
+  setPcol(0);
+  vox = snapVox.map(l => l.map(r => r.slice())); BRIDGES.forEach((b, i) => { b.on = !!snapOn[i]; }); coins = snapCoins; updateCoinHud(); hasKey = snapKey; frozen = 0; dirty = true;
+  showMsg(reason + " back to the last gate. the section resets.");
 }
 
 // ---------- discrete movement ----------
 function startAct(type, tx, ty, tz, d){
+  if(airV === null && type !== 'air' && (tx !== G.x || tz !== G.z || ty !== G.y) && cellAt(G.x, G.y - 1, G.z) === 'c'){
+    vox[G.y - 1][G.z][G.x] = '.'; dirty = true;
+    if(!crumbleSeen){ crumbleSeen = true; showMsg("it crumbles behind you."); }
+  }
   act = {type, fx: G.x, fy: G.y, fz: G.z, tx, ty, tz, t: 0,
          dur: type === 'roll' ? ROLL_T : (type === 'climb' || type === 'down') ? CLIMB_T : type === 'hop' ? HOP_T : type === 'bounce' ? 0.18 : FALL_T,
          dx: d ? d.x : 0, dz: d ? d.z : 0};
 }
+function latTry(sign){
+  const rv = [[1,0],[0,-1],[-1,0],[0,1]];
+  let v = rv[face];
+  tryRoll({x: sign * v[0], z: sign * v[1]});
+  if(!act){
+    // blocked straight ahead: try whipping the tower a quarter turn in your direction
+    const of = face;
+    face = (face + sign + 4) % 4;
+    v = rv[face];
+    tryRoll({x: sign * v[0], z: sign * v[1]});
+    if(!act) face = of;
+  }
+}
 function tryRoll(d){
   const tx = G.x + d.x, tz = G.z + d.z;
   if(!inB(tx, tz)) return;
+  if(patAt(tx, G.y, tz) >= 0) return;          // the slider is a moving wall
   const ch = cellAt(tx, G.y, tz);
   if(ch === 'D'){
     if(hasKey){ vox[G.y][tz][tx] = '.'; hasKey = false; dirty = true; showMsg("unlocked"); }
     else if(lockMsgCd <= 0){ showMsg("locked. find the key."); lockMsgCd = 2; }
     return;
   }
-  if(ch === 'E'){
+  if(ch === 'E' || ch === 'R' || ch === 'U'){
     if(frozen > 0){ vox[G.y][tz][tx] = '.'; dirty = true; showMsg("frozen solid. it shatters."); }
-    else die("touched a sentinel.");
+    else if((ch === 'R' && pcol === 1) || (ch === 'U' && pcol === 2)){
+      lastDir = d; startAct('roll', tx, G.y, tz, d);   // same color: it lets you pass
+    }
+    else die(ch === 'E' ? "grey never forgives." : "wrong color. it bites.");
+    return;
+  }
+  if(ch === 'm' || ch === 'n'){
+    if((ch === 'm' && pcol === 1) || (ch === 'n' && pcol === 2)){ lastDir = d; startAct('roll', tx, G.y, tz, d); }
+    else if(lockMsgCd <= 0){ showMsg("the membrane wants " + (ch === 'm' ? "red" : "blue") + "."); lockMsgCd = 1; }
     return;
   }
   if(ch === '#' || ch === '='){
@@ -124,6 +166,81 @@ function tryRoll(d){
   // edge: topple over, then land() chains cell-by-cell falls until something stops you
   lastDir = d; startAct('down', tx, G.y - 1, tz, d);
 }
+function airStep(){
+  const rv = [[1,0],[0,-1],[-1,0],[0,1]][face];
+  const lat = (keys['d'] || keys['arrowright']) ? 1 : (keys['a'] || keys['arrowleft']) ? -1 : 0;
+  if(lat && !airLat){
+    airDrift = lat;                                   // momentum arms even against a wall
+    const tx = G.x + lat * rv[0], tz = G.z + lat * rv[1];
+    if(inB(tx, tz)){
+      const ch = cellAt(tx, G.y, tz);
+      if(ch === 'E' || ch === 'R' || ch === 'U'){ die("clipped it mid-air."); return 'dead'; }
+      if(ch !== '^' && !isSolid(ch)){
+        airLat = true;
+        let dty = G.y;
+        if(airV > 0){
+          const up2 = cellAt(tx, G.y + 1, tz);
+          if(up2 !== '^' && !isSolid(up2)){ dty = G.y + 1; airV--; }
+        } else {
+          const dn2 = cellAt(tx, G.y - 1, tz);
+          if(dn2 !== '^' && !isSolid(dn2)) dty = G.y - 1;
+        }
+        if(dty !== G.y && cellAt(tx, G.y, tz) === 'o'){
+          vox[G.y][tz][tx] = '.'; coins++; dirty = true; updateCoinHud();
+          showMsg("coin. " + coins + "/" + COINS.quota + ".");
+        }
+        startAct('air', tx, dty, tz, null);
+        return 'act';
+      }
+    }
+  }
+  if(airV <= 0){
+    const b0 = cellAt(G.x, G.y - 1, G.z);
+    if(b0 !== '^' && isSolid(b0)){ airV = null; airLat = false; airDrift = 0; return 'down'; }
+  }
+  if(airDrift && !airLat){
+    const tx = G.x + airDrift * rv[0], tz = G.z + airDrift * rv[1];
+    const ch = inB(tx, tz) ? cellAt(tx, G.y, tz) : '#';
+    if(ch !== 'E' && ch !== 'R' && ch !== 'U' && ch !== '^' && !isSolid(ch)){
+      airLat = true;
+      let dty = G.y;
+      if(airV > 0){
+        const up2 = cellAt(tx, G.y + 1, tz);
+        if(up2 !== '^' && !isSolid(up2)){ dty = G.y + 1; airV--; }
+      } else {
+        const dn2 = cellAt(tx, G.y - 1, tz);
+        if(dn2 !== '^' && !isSolid(dn2)) dty = G.y - 1;
+      }
+      if(dty !== G.y && cellAt(tx, G.y, tz) === 'o'){
+        vox[G.y][tz][tx] = '.'; coins++; dirty = true; updateCoinHud();
+        showMsg("coin. " + coins + "/" + COINS.quota + ".");
+      }
+      startAct('air', tx, dty, tz, null);
+      return 'act';
+    }
+    airDrift = 0;                                     // momentum dies on the wall; it never suicides
+  }
+  if(airV > 0){
+    if(cellAt(G.x, G.y + 1, G.z) === '^'){ airV = 0; showMsg("bonk. teeth graze you."); }
+    if(free(G.x, G.y + 1, G.z)){ airV--; airLat = false; startAct('air', G.x, G.y + 1, G.z, null); return 'act'; }
+    airV = 0; airLat = false; // bonk: drop into the descent branch this same step
+  }
+  if(airV === 0 && hangSteps > 0){
+    hangSteps--;
+    startAct('air', G.x, G.y, G.z, null);   // hover in place; laterals re-sampled next step
+    act.dur = 0.13;
+    return 'act';
+  }
+  const below = cellAt(G.x, G.y - 1, G.z);
+  if(below === '^'){
+    showMsg("impaled. it lets you go.");
+    airV = 2; airLat = false; airDrift = 0; hangSteps = 0;
+    return airStep();
+  }
+  if(!isSolid(below)){ airLat = false; startAct('air', G.x, G.y - 1, G.z, null); return 'act'; }
+  airV = null; airLat = false; airDrift = 0; // touched down: caller falls through to ground settle
+  return 'down';
+}
 function land(){
   if(act.type === 'roll' || act.type === 'climb' || act.type === 'down'){
     const axis = new THREE.Vector3(act.dz, 0, -act.dx).normalize();
@@ -134,18 +251,68 @@ function land(){
   act = null;
   roller.quaternion.copy(baseQ);
   player.position.copy(cellCenter(G.x, G.y, G.z));
+  if(cellAt(G.x, G.y, G.z) === 'o'){
+    vox[G.y][G.z][G.x] = '.'; coins++; dirty = true; updateCoinHud();
+    showMsg("coin. " + coins + "/" + COINS.quota + ".");
+  }
+  if(airV !== null){
+    if(airStep() !== 'down') return;
+  }
   const ch = cellAt(G.x, G.y, G.z);
   if(ch === 'K'){ vox[G.y][G.z][G.x] = '.'; hasKey = true; dirty = true; showMsg("key collected"); }
-  else if(ch === 'F'){ vox[G.y][G.z][G.x] = '.'; frozen += 6; dirty = true; showMsg("time frozen 6s"); }
-  else if(ch === 'G'){ won = true; showMsg("section cleared. press R to run it again."); return; }
-  else if(ch === '^'){ die("impaled on the spikes."); return; }
+  else if(ch === 'F'){ frozen = 6; showMsg("time frozen 6s"); }
+  else if(ch === 'A'){ boostT = 8; showMsg("the line smells blood."); }
+  else if(ch === 'O'){ coolT = 6; showMsg("coolant. the line cools off."); }
+  else if(ch === 'T'){
+    for(const t of TELE){
+      if(t.src[0] === G.x && t.src[1] === G.z && t.src[2] === G.y){
+        G.x = t.dst[0]; G.z = t.dst[1]; G.y = t.dst[2];
+        player.position.copy(cellCenter(G.x, G.y, G.z));
+        showMsg("elsewhere.");
+        break;
+      }
+    }
+  }
+  else if(ch === 'g'){
+    vox[G.y][G.z][G.x] = '.'; dirty = true;
+    checkpoint = {x: G.x, y: G.y, z: G.z};
+    gateIdx++;
+    snapshot();
+    camH = Math.max(camH, G.y - 1.6);
+    showMsg("checkpoint banked. the line quickens.");
+  }
+  else if(ch === 'r'){ setPcol(1); }
+  else if(ch === 'u'){ setPcol(2); }
+  else if(ch === 'J'){
+    airV = 4; airLat = false; hangSteps = 2; airDrift = 0; showMsg("sproing.");
+    if(airStep() !== 'down') return;
+  }
+  else if(ch === 'C'){ vox[G.y][G.z][G.x] = '.'; dirty = true; startRing(); return; }
+  else if(ch === 'L'){
+    let onNow = false;
+    for(const b of BRIDGES){
+      const mine = (b.lever[0] === G.x && b.lever[1] === G.z && b.lever[2] === G.y) ||
+                   (b.levers2 || []).some(lv => lv[0] === G.x && lv[1] === G.z && lv[2] === G.y);
+      if(!mine) continue;
+      b.on = !b.on; onNow = b.on;
+      for(const [bx, bz, by] of b.cells)            vox[by][bz][bx] = b.on ? '=' : '.';
+      for(const [bx, bz, by] of (b.icells || []))   vox[by][bz][bx] = b.on ? '.' : '=';
+    }
+    dirty = true; showMsg(onNow ? "clunk. somewhere, a bridge slams into place." : "shhk. somewhere, it withdraws.");
+  }
+  else if(ch === 'G'){
+    if(coins >= COINS.quota){ won = true; showMsg("section cleared. press R to run it again."); return; }
+    showMsg("the gate counts coins. " + coins + "/" + COINS.quota + ". it stays shut.");
+  }
+  else if(ch === '^'){
+    showMsg("impaled. it lets you go.");
+    airV = 2; airLat = false; airDrift = 0; hangSteps = 0;
+    if(airStep() !== 'down') return;
+  }
   const below = cellAt(G.x, G.y - 1, G.z);
   if(below === '~'){ die("burned by the core."); return; }
-  if(below === 'E'){
-    vox[G.y - 1][G.z][G.x] = '.'; dirty = true;
-    showMsg("crushed it.");
-    startAct('fall', G.x, G.y - 1, G.z, null);
-    return;
+  if(below === 'E' || below === 'R' || below === 'U'){
+    die("its back is not a road."); return;
   }
   if(!isSolid(below)) startAct('fall', G.x, G.y - 1, G.z, null);
 }
@@ -153,35 +320,45 @@ function land(){
 const keys = {};
 function update(dt){
   if(won) return;
-  if(grace > 0) grace -= dt;
-  else if(frozen > 0) frozen -= dt;
-  else camH += (RISE + gateIdx * 0.07) * dt * (G.y - camH > 5 ? 4 : 1); // each gate passed, the line quickens
+  if(boostT > 0) boostT -= dt;
+  if(coolT > 0) coolT -= dt;
+  flow = (act || airV !== null) ? Math.min(5, flow + dt * 1.2) : Math.max(0, flow - dt * 2.5);
+  for(let i = 0; i < PATROLS.length; i++){
+    const p = PATROLS[i], st = patState[i];
+    if(frozen > 0) break;                      // freeze stops the sliders too
+    st.t += dt;
+    if(st.t >= p.step){
+      st.t = 0;
+      st.k = (st.k + 1) % p.cells.length;   // one-way conveyor: it never comes back at you
+      const c = p.cells[st.k];
+      const pcx = act ? act.tx : G.x, pcy = act ? act.ty : G.y, pcz = act ? act.tz : G.z;
+      if(airV === null && pcx === c[0] && pcz === c[1] && pcy === c[2]){
+        if(act){ G.x = act.tx; G.y = act.ty; G.z = act.tz; act = null; player.position.copy(cellCenter(G.x, G.y, G.z)); }
+        const ox = G.x < 1 ? -1 : G.x > 4 ? 1 : 0, oz = (ox === 0) ? (G.z < 1 ? -1 : 1) : 0;
+        showMsg("swept off the edge.");
+        startAct('roll', G.x + ox, G.y, G.z + oz, null);
+      }
+    }
+  }
+  if(frozen > 0) frozen -= dt;
+  else {
+    let rate = RISE + gateIdx * 0.07 + (boostT > 0 ? 0.5 : 0) - (coolT > 0 ? 0.25 : 0) - 0.04 * flow;
+    camH += Math.max(0.15, rate) * dt * (G.y - camH > 5 ? 4 : 1); // never waits; flow and coolant soothe it, accelerators enrage it
+  }
+  dangerPlane.material.color.setHex(boostT > 0 ? 0xff5a1f : coolT > 0 ? 0x3a78d9 : 0xc92a2a);
   if(lockMsgCd > 0) lockMsgCd -= dt;
 
   if(!rotating && !act){
     const RV = [[1,0],[0,-1],[-1,0],[0,1]][face]; // camera right
     const FV = [[0,-1],[-1,0],[0,1],[1,0]][face]; // into the screen
-    let d = null;
-    if(keys['d'] || keys['arrowright']) d = {x: RV[0], z: RV[1]};
-    else if(keys['a'] || keys['arrowleft']) d = {x: -RV[0], z: -RV[1]};
-    else if(keys['w'] || keys['arrowup']) d = {x: FV[0], z: FV[1]};
-    else if(keys['s'] || keys['arrowdown']) d = {x: -FV[0], z: -FV[1]};
-    if(d) tryRoll(d);
+    const lat = (keys['d'] || keys['arrowright']) ? 1 : (keys['a'] || keys['arrowleft']) ? -1 : 0;
+    if(lat) latTry(lat);
   }
 
   // face selection with hysteresis (corner cells keep the previous face)
   const dx = G.x + 0.5 - CX, dz = G.z + 0.5 - CX, ax = Math.abs(dx), az = Math.abs(dz);
   if(Math.abs(ax - az) > 0.35) face = az > ax ? (dz > 0 ? 0 : 2) : (dx > 0 ? 1 : 3);
 
-  if(gateIdx < GATES.length){
-    const g = GATES[gateIdx];
-    if(camH > g.y - 1.4) camH = g.y - 1.4;
-    if(G.y >= g.y){
-      checkpoint = {x: g.x, y: g.y, z: g.z}; gateIdx++;
-      camH = Math.max(camH, g.y - 1.6); // the line catches up to the gate you just passed
-      showMsg("checkpoint. the tower quickens.");
-    }
-  }
   if(G.y < camH - 6) die("dropped out of frame.");
 }
 
@@ -287,8 +464,8 @@ function rebuildBlocks(){
     if(ch === '.') continue;
     if((ch === '#' || ch === '=') && !exposedCell(x, y, z)) continue;
     let m = null, hex = null;
-    if(ch === '#' || ch === '='){
-      hex = ch === '=' ? 0xc09a62 : RINGS.includes(y) ? 0x8f7fd6 : ((x + z + y) % 2 ? 0x808a98 : 0x747e8c);
+    if(ch === '#' || ch === '=' || ch === 'c'){
+      hex = ch === 'c' ? 0x9a6b3f : ch === '=' ? 0xc09a62 : RINGS.includes(y) ? 0x8f7fd6 : ((x + z + y) % 2 ? 0x808a98 : 0x747e8c);
       m = new THREE.Mesh(box, mat(hex));
       m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
       m.add(edgeLine(0x10151d));
@@ -304,14 +481,33 @@ function rebuildBlocks(){
       cutList.push({m, hex});
     } else if(ch === '^'){
       m = new THREE.Group();
+      const ceiling = (y + 1 >= ROWS || isSolid(vox[y + 1][z][x])) && y > 0 && !isSolid(vox[y - 1][z][x]);
       for(const [ox, oz] of [[-0.24,-0.24],[0.24,-0.24],[-0.24,0.24],[0.24,0.24],[0,0]]){
         const c = new THREE.Mesh(spikeGeo, mat(0x8e2b3a));
         c.position.set(ox, 0.2, oz);
         m.add(c);
       }
-      m.position.set(x + 0.5 - CX, y, z + 0.5 - CX);
-    } else if(ch === 'E'){
-      m = new THREE.Mesh(box, mat(0xa32424));
+      if(ceiling){ m.rotation.x = Math.PI; m.position.set(x + 0.5 - CX, y + 1, z + 0.5 - CX); }
+      else m.position.set(x + 0.5 - CX, y, z + 0.5 - CX);
+    } else if(ch === 'o'){
+      m = new THREE.Mesh(box, mat(0xffd34d));
+      m.scale.set(0.3, 0.3, 0.3);
+      m.rotation.y = Math.PI / 4; m.rotation.z = Math.PI / 4;
+      m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
+      m.add(edgeLine(0xfff2b0));
+    } else if(ch === 'g'){
+      m = new THREE.Mesh(box, mat(0xd9a92f));
+      m.scale.set(0.34, 0.96, 0.34);
+      m.position.set(x + 0.5 - CX, y + 0.48, z + 0.5 - CX);
+      m.add(edgeLine(0xffe28a));
+    } else if(ch === 'T'){
+      m = new THREE.Mesh(box, mat(0x35d0c8));
+      m.scale.set(0.9, 0.12, 0.9);
+      m.position.set(x + 0.5 - CX, y + 0.08, z + 0.5 - CX);
+      m.add(edgeLine(0xbafff8));
+    } else if(ch === 'E' || ch === 'R' || ch === 'U'){
+      const fh = ch === 'R' ? 0xc2453c : ch === 'U' ? 0x3c6bc2 : 0x6a7280;
+      m = new THREE.Mesh(box, mat(fh));
       m.scale.setScalar(0.94);
       m.position.set(x + 0.5 - CX, y + 0.47, z + 0.5 - CX);
       m.add(edgeLine(0x3d0a0a));
@@ -324,7 +520,7 @@ function rebuildBlocks(){
           m.add(eye);
         }
       }
-      cutList.push({m, hex: 0xa32424});
+      cutList.push({m, hex: ch === 'R' ? 0xc2453c : ch === 'U' ? 0x3c6bc2 : 0x6a7280});
         } else if(ch === 'L'){
       m = new THREE.Group();
       const base = new THREE.Mesh(box, mat(0x3a4250)); base.scale.set(0.5, 0.14, 0.5); base.position.y = 0.07; m.add(base);
@@ -333,6 +529,23 @@ function rebuildBlocks(){
       const knob = new THREE.Mesh(box, mat(0xd64545)); knob.scale.setScalar(0.14);
       knob.position.set(0.245, 0.55, 0); m.add(knob);
       m.position.set(x + 0.5 - CX, y, z + 0.5 - CX);
+    } else if(ch === 'J'){
+      m = new THREE.Group();
+      for(let cl = 0; cl < 3; cl++){
+        const coil = new THREE.Mesh(new THREE.CylinderGeometry(0.30 - cl * 0.03, 0.32 - cl * 0.03, 0.07, 10), mat(0x7fd17f));
+        coil.position.y = 0.08 + cl * 0.13; m.add(coil);
+      }
+      const plate = new THREE.Mesh(box, mat(0xa8e6a8)); plate.scale.set(0.52, 0.08, 0.52); plate.position.y = 0.5; m.add(plate);
+      m.position.set(x + 0.5 - CX, y, z + 0.5 - CX);
+    } else if(ch === 'r' || ch === 'u'){
+      m = new THREE.Group();
+      const pot = new THREE.Mesh(box, mat(ch === 'r' ? 0xe1493f : 0x3f7fe1)); pot.scale.set(0.5, 0.42, 0.5); pot.position.y = 0.21; m.add(pot);
+      const rim = new THREE.Mesh(box, mat(0xdfe6f0)); rim.scale.set(0.56, 0.08, 0.56); rim.position.y = 0.44; m.add(rim);
+      m.position.set(x + 0.5 - CX, y, z + 0.5 - CX);
+    } else if(ch === 'm' || ch === 'n'){
+      m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({color: ch === 'm' ? 0xe1493f : 0x3f7fe1, transparent: true, opacity: 0.45}));
+      m.scale.set(0.96, 0.96, 0.96);
+      m.position.set(x + 0.5 - CX, y + 0.5, z + 0.5 - CX);
     } else {
       const col = ch === 'K' ? 0xf5c542 : ch === 'F' ? 0x4cc9f0 : ch === 'G' ? 0x4ade80 : 0xa78bfa;
       m = new THREE.Mesh(box, mat(col));
@@ -405,37 +618,66 @@ function finishRing(){
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault();
-  else keys[k] = true;
+  keys[k] = true;
   if(k === 'r') resetRun(true);
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-// one-thumb pad: slide to move along an axis, tap to jump
-const pad = document.getElementById('pad'), padNub = document.getElementById('padNub');
-let padPtr = null, padSX = 0, padSY = 0, padMoved = false;
-function padClear(){ keys['a'] = keys['d'] = keys['w'] = keys['s'] = false; padNub.style.transform = 'translate(-50%,-50%)'; }
-pad.addEventListener('pointerdown', e => {
-  e.preventDefault(); padPtr = e.pointerId; padSX = e.clientX; padSY = e.clientY; padMoved = false;
-  pad.setPointerCapture(e.pointerId);
+addEventListener('keydown', e => {
+  if(e.key.toLowerCase() === 'p'){
+    paused = !paused;
+    const pb = document.getElementById('pausebtn'); if(pb) pb.textContent = paused ? '\u25B6' : '\u23F8';
+    showMsg(paused ? "paused." : "unpaused.");
+  }
 });
-pad.addEventListener('pointermove', e => {
-  if(e.pointerId !== padPtr) return;
-  const dx = e.clientX - padSX, dy = e.clientY - padSY, DZ = 24;
-  keys['a'] = keys['d'] = keys['w'] = keys['s'] = false;
-  if(Math.hypot(dx, dy) > DZ){
-    padMoved = true;
-    if(Math.abs(dx) > Math.abs(dy)) keys[dx > 0 ? 'd' : 'a'] = true;
-    else keys[dy < 0 ? 'w' : 's'] = true;
-    const cl = Math.min(Math.hypot(dx, dy), 46), ang = Math.atan2(dy, dx);
-    padNub.style.transform = 'translate(calc(-50% + ' + (Math.cos(ang)*cl).toFixed(1) + 'px), calc(-50% + ' + (Math.sin(ang)*cl).toFixed(1) + 'px))';
-  } else padNub.style.transform = 'translate(-50%,-50%)';
+if(typeof document.createElement === 'function'){
+const pb = document.createElement('div');
+pb.id = 'pausebtn'; pb.textContent = '\u23F8';
+pb.style.cssText = 'position:fixed;top:12px;right:12px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;background:#1f2940cc;color:#cfe0ff;border:1px solid #3a4a6a;border-radius:9px;font-size:17px;z-index:30;cursor:pointer;user-select:none;';
+pb.addEventListener('click', () => {
+  paused = !paused; pb.textContent = paused ? '\u25B6' : '\u23F8';
+  showMsg(paused ? "paused." : "unpaused.");
 });
-['pointerup','pointercancel'].forEach(ev => pad.addEventListener(ev, e => {
-  if(e.pointerId !== padPtr) return;
-  padPtr = null; padClear();
+document.body.appendChild(pb);
+const ch2 = document.createElement('div');
+ch2.id = 'coinhud';
+ch2.style.cssText = 'position:fixed;top:12px;right:58px;height:38px;display:flex;align-items:center;padding:0 12px;background:#1f2940cc;color:#ffd34d;border:1px solid #3a4a6a;border-radius:9px;font-size:14px;z-index:30;user-select:none;font-family:inherit;';
+document.body.appendChild(ch2);
+}
+function updateCoinHud(){
+  const el = (typeof document.getElementById === 'function') ? document.getElementById('coinhud') : null;
+  if(el) el.textContent = '\u25C6 ' + coins + ' / ' + COINS.quota;
+}
+updateCoinHud();
+// lateral touch: hold either half of the screen
+let touchPtr = null;
+function setTouch(x){ keys['a'] = keys['d'] = false; if(x !== null) keys[x > innerWidth / 2 ? 'd' : 'a'] = true; }
+canvas.addEventListener('pointerdown', e => { e.preventDefault(); touchPtr = e.pointerId; setTouch(e.clientX); });
+canvas.addEventListener('pointermove', e => { if(e.pointerId === touchPtr) setTouch(e.clientX); });
+['pointerup','pointercancel'].forEach(ev => addEventListener(ev, e => {
+  if(e.pointerId === touchPtr){ touchPtr = null; setTouch(null); }
 }));
 
 // ---------- loop ----------
 resetRun(true);
+const bridgeGhostGroup = new THREE.Group(); scene.add(bridgeGhostGroup);
+const bridgeGhostMat = new THREE.MeshBasicMaterial({ color: 0x57e0c4, transparent: true, opacity: 0.22 });
+const bridgeGhostList = [];
+for(const b of BRIDGES) for(const [bx, bz, by] of b.cells){
+  const m = new THREE.Mesh(box, bridgeGhostMat);
+  m.position.set(bx + 0.5 - CX, by + 0.5, bz + 0.5 - CX);
+  m.scale.set(0.96, 0.96, 0.96);
+  bridgeGhostGroup.add(m); bridgeGhostList.push({m, bx, bz, by});
+}
+const patGroup = new THREE.Group(); scene.add(patGroup);
+const patMeshes = PATROLS.map(() => {
+  const m = new THREE.Mesh(box, mat(0x4f3a78));
+  m.scale.setScalar(0.92);
+  m.add(edgeLine(0xb89bff));
+  patGroup.add(m);
+  return m;
+});
+function refreshBridgeGhosts(){ for(const g of bridgeGhostList) g.m.visible = vox[g.by][g.bz][g.bx] !== '='; }
+refreshBridgeGhosts();
 rebuildBlocks();
 let camA = 0, camDist = 15, last = performance.now();
 function lerpAngle(a, b, t){
@@ -443,6 +685,7 @@ function lerpAngle(a, b, t){
   return a + d * t;
 }
 function frame(now){
+  if(paused){ last = now; renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   const dt = Math.min((now - last) / 1000, 0.05); last = now;
   update(dt);
 
@@ -466,6 +709,7 @@ function frame(now){
     } else {
       const p = cf.clone().lerp(ct, k);
       if(act.type === 'hop') p.y += Math.sin(Math.PI * k) * 0.55;
+      if(act.type === 'air' && act.fx === act.tx && act.fy === act.ty && act.fz === act.tz) p.y += Math.sin(Math.PI * k) * 0.10;
       player.position.copy(p);
     }
     if(k >= 1) land();
@@ -477,7 +721,18 @@ function frame(now){
     ringGroup.rotation.y = -e2 * Math.PI / 2;
     if(k >= 1) finishRing();
   }
-  if(dirty) rebuildBlocks();
+  if(dirty){ rebuildBlocks(); refreshBridgeGhosts(); }
+  for(let i = 0; i < PATROLS.length; i++){
+    const p = PATROLS[i], st = patState[i];
+    const c = p.cells[st.k];
+    const nk = Math.max(0, Math.min(p.cells.length - 1, st.k + st.dir));
+    const n = p.cells[nk];
+    const f = Math.min(1, st.t / p.step);
+    patMeshes[i].position.set(
+      c[0] + (n[0] - c[0]) * f + 0.5 - CX,
+      c[2] + 0.46,
+      c[1] + (n[1] - c[1]) * f + 0.5 - CX);
+  }
 
   lavaMat.emissiveIntensity = 0.75 + Math.sin(now / 300) * 0.25;
   spinners.forEach(s => { s.rotation.y += dt * 2; });
@@ -504,7 +759,7 @@ function frame(now){
     const ratio = Math.max(axx, azz) > 0.01 ? Math.min(axx, azz) / Math.max(axx, azz) : 0;
     targetA = aBase + Math.sign(lat) * ratio * ratio * (Math.PI / 4);
   }
-  camA = lerpAngle(camA, targetA, Math.min(1, dt * 5));
+  camA = lerpAngle(camA, targetA, Math.min(1, dt * 8));
   updateGhosts(dt);
   viewH += (Math.max(G.y, camH - 2) + 0.6 - viewH) * Math.min(1, dt * 4.5);
   camera.position.set(Math.sin(camA) * camDist, viewH + camDist * 0.55, Math.cos(camA) * camDist);
