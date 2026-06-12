@@ -3,20 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>square playground v5 — no way to get stuck</title>
+<title>square playground v20 — slow is smooth</title>
 <style>
   html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#10141d;font-family:ui-monospace,Menlo,Consolas,monospace;touch-action:none;overscroll-behavior:none;}
   *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;}
   #msg{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);color:#cfe0ff;font-size:14px;opacity:.85;text-align:center;pointer-events:none;}
   #hint{position:fixed;left:50%;top:18px;transform:translateX(-50%);color:#6b7a99;font-size:12px;pointer-events:none;}
   #coins{position:fixed;top:14px;right:14px;color:#ffd34d;font-size:14px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:7px 12px;pointer-events:none;}
+  #redo{position:fixed;bottom:24px;right:14px;color:#cfe0ff;font-size:13px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:8px 13px;cursor:pointer;}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hint">sand crumbles behind you. the far side fades. spikes mean it now.</div>
+<div id="hint">every floor is a problem. read it, solve it, drop. dying restarts the room.</div>
 <div id="msg"></div>
 <div id="coins">&#9670; 0</div>
+<div id="redo">&#8635; room</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ---------------------------------------------------------------------------
@@ -45,7 +47,23 @@ const Kk = (c, r) => mod(c) + ',' + r;
 
 // --- scene scaffolding ---
 const canvas = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+} catch(errAA) {
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+  } catch(errPlain) {
+    const m0 = document.getElementById('msg');
+    if(m0) m0.textContent = "webgl wouldn't start. close older playground tabs (each holds a graphics context), then reload.";
+    throw errPlain;
+  }
+}
+canvas.addEventListener('webglcontextlost', e => {
+  e.preventDefault();
+  const m0 = document.getElementById('msg');
+  if(m0) m0.textContent = "graphics context lost. reload the page.";
+});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x10141d);
@@ -59,6 +77,43 @@ const plate = new THREE.BoxGeometry(0.98, 0.07, 0.98);
 const edgeGeo = new THREE.EdgesGeometry(box);
 const palette = [0x33415e, 0x3a4a6a, 0x2c3852];
 function edgeLine(c){ return new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.5 })); }
+const faceMat = new THREE.MeshLambertMaterial({ color: 0x14101c });
+const miniCone = new THREE.ConeGeometry(0.11, 0.28, 4);
+function setMouth(g, kind){
+  const [b1, b2] = g.userData.bars;
+  if(kind === 'neutral'){
+    b1.position.set(-0.075, -0.11, 0); b1.rotation.z = 0;
+    b2.position.set(0.075, -0.11, 0); b2.rotation.z = 0;
+  } else {
+    const sgn2 = kind === 'happy' ? 1 : -1;
+    b1.position.set(-0.085, -0.11, 0); b1.rotation.z = -0.55 * sgn2;
+    b2.position.set(0.085, -0.11, 0); b2.rotation.z = 0.55 * sgn2;
+  }
+}
+function makeFace(kind){
+  const g = new THREE.Group();
+  const mk = (sx, sy) => { const e = new THREE.Mesh(box, faceMat); e.scale.set(sx, sy, 0.03); g.add(e); return e; };
+  const e1 = mk(0.09, 0.09); e1.position.set(-0.14, 0.1, 0);
+  const e2 = mk(0.09, 0.09); e2.position.set(0.14, 0.1, 0);
+  g.userData.bars = [mk(0.17, 0.05), mk(0.17, 0.05)];
+  setMouth(g, kind);
+  return g;
+}
+function attachFaces(grp, sideKind, topKind){
+  const list = [];
+  for(let f2 = 0; f2 < 4; f2++){
+    const fg = makeFace(sideKind);
+    const a2 = f2 * Math.PI / 2;
+    fg.rotation.y = a2;
+    fg.position.set(Math.sin(a2) * 0.43, 0.04, Math.cos(a2) * 0.43);
+    grp.add(fg); list.push(fg);
+  }
+  const tg = makeFace(topKind);
+  tg.rotation.x = -Math.PI / 2;
+  tg.position.y = 0.44;
+  grp.add(tg); list.push(tg);
+  return list;
+}
 
 // quantized depth grading: five bands, block by block, desaturated and sunk
 // toward the dark the further around the tower a cube sits. recomputed from
@@ -84,76 +139,59 @@ hero.add(edgeLine(0xffe8b0));
 tower.add(hero);
 
 // --- world ---
-let solidSet, pads, sticky, sandSet, sandTimers, spikes, coinsSet, keySet, chestSet, BANDS;
-let cubeList, coinMeshes, keyMeshes, bandCubes, spikeMeshes, sandMeshes, chestMeshes;
+let solidSet, pads, sticky, wallSticky, sandSet, sandTimers, spikes, coinsSet, keySet, chestSet, doorSet, countDoorSet, crackedSet, MONSTERS, BANDS;
+let cubeList, coinMeshes, keyMeshes, bandCubes, spikeMeshes, sandMeshes, chestMeshes, doorMeshes, countDoorMeshes;
 function solid(c, r){
   if(r < 0) return true;
   for(const B of BANDS) if(r >= B.r0 && r <= B.r1) return B.set.has(Kk(c - B.off, r));
-  return solidSet.has(Kk(c, r)) || chestSet.has(Kk(c, r));
+  return solidSet.has(Kk(c, r)) || chestSet.has(Kk(c, r)) || doorSet.has(Kk(c, r)) || countDoorSet.has(Kk(c, r));
 }
 function clearGroup(){
   for(let i = tower.children.length - 1; i >= 0; i--){ const ch = tower.children[i]; if(ch !== hero) tower.remove(ch); }
 }
 function buildWorld(){
-  solidSet = new Set(); pads = new Set(); sticky = new Set(); sandSet = new Set();
-  sandTimers = new Map(); spikes = new Set(); coinsSet = new Set(); keySet = new Set(); chestSet = new Set();
+  solidSet = new Set(); pads = new Set(); sticky = new Set(); wallSticky = new Set(); sandSet = new Set();
+  sandTimers = new Map(); spikes = new Set(); coinsSet = new Set(); keySet = new Set(); chestSet = new Set(); doorSet = new Set();
+  countDoorSet = new Set(); crackedSet = new Set(); MONSTERS = [];
   BANDS = [
-    { r0: 39, r1: 41, off: 0, t: 0, period: 1.6, stepDur: 0.32, anim: 0, dir: 1,  set: new Set() },
-    { r0: 19, r1: 20, off: 0, t: 0, period: 2.1, stepDur: 0.32, anim: 0, dir: -1, set: new Set() }
+    { r0: 39, r1: 39, off: 0, t: 0, period: 1.15, stepDur: 0.32, anim: 0, dir: 1,  set: new Set() },
+    { r0: 19, r1: 19, off: 0, t: 0, period: 2.1, stepDur: 0.32, anim: 0, dir: -1, set: new Set() },
+    { r0: 17, r1: 17, off: 0, t: 0, period: 1.4, stepDur: 0.32, anim: 0, dir: 1,  set: new Set() }
   ];
   const fill = (c, r) => solidSet.add(Kk(c, r));
   const wall = (c, r, h2) => { for(let i = 0; i < h2; i++) fill(c, r + i); };
   const sand = (c, r) => { fill(c, r); sandSet.add(Kk(c, r)); };
 
-  for(let c = 0; c < N; c++){ fill(c, 0); fill(c, 1); }
-  // L6 (7): holes 3,12 + walls
-  for(let c = 0; c < N; c++) if(c !== 3 && c !== 12) fill(c, 7);
-  wall(7, 8, 2); wall(16, 8, 2);
-  // L5 (12): holes 9,16 + walls
-  for(let c = 0; c < N; c++) if(c !== 9 && c !== 16) fill(c, 12);
-  wall(2, 13, 2); wall(12, 13, 2);
-  // band B floor zone: rows 19..20 counter-rotating
-  for(let c = 0; c < N; c++) if(c % 5 !== 1) BANDS[1].set.add(Kk(c, 19));
-  BANDS[1].set.add(Kk(10, 20));
-  // L4 (24): holes 0,13 + walls; spikes guard a corridor
-  for(let c = 0; c < N; c++) if(c !== 0 && c !== 13 && c !== 6) fill(c, 24);
-  wall(5, 25, 2); wall(17, 25, 2);
-  spikes.add(Kk(9, 25)); spikes.add(Kk(10, 25));
-  // L3 (29): sand crossing east to a dead-end coin
-  for(let c = 2; c <= 9; c++) fill(c, 29);
-  sand(10, 29); sand(11, 29); sand(12, 29); sand(13, 29);
-  fill(14, 29); wall(15, 30, 2);
-  coinsSet.add(Kk(14, 30));
-  pads.add(Kk(2, 29));
-  // L2.5 (34): holes 4,8; chest in a walled pocket
-  for(let c = 0; c < N; c++) if(c !== 4 && c !== 8 && c !== 13) fill(c, 34);
-  wall(10, 35, 2); wall(15, 35, 2);
-  chestSet.add(Kk(12, 35));
-  wall(0, 35, 2);
-  // band A: rows 39..41
+  // ---- the bands: two moving floors, both obstacles now ----
   for(let c = 0; c < N; c++) if(c % 7 !== 2) BANDS[0].set.add(Kk(c, 39));
-  BANDS[0].set.add(Kk(4, 40)); BANDS[0].set.add(Kk(4, 41)); BANDS[0].set.add(Kk(13, 40));
-  // L2 (45): spike ring, holes 2,19, walls
-  for(let c = 0; c < N; c++) if(c !== 2 && c !== 19) fill(c, 45);
-  spikes.add(Kk(8, 46)); spikes.add(Kk(9, 46)); spikes.add(Kk(14, 46));
-  wall(4, 46, 2); wall(11, 46, 2);
-  coinsSet.add(Kk(2, 38));
-  // L1.5 (49): catch shelf with the KEY at its far end
-  for(let c = 14; c <= 19; c++) fill(c, 49);
-  keySet.add(Kk(19, 50));
-  coinsSet.add(Kk(17, 54));
-  // L1 (53): runway, wall forcing east, pad to the sticky slab
-  for(let c = 3; c <= 13; c++) fill(c, 53);
-  wall(5, 54, 2);
-  pads.add(Kk(12, 53));
-  for(let c = 12; c <= 16; c++){ fill(c, 57); sticky.add(Kk(c, 57)); }
-  // spawn deck
-  for(let c = 0; c < N; c++) if(c !== 6 && c !== 7) fill(c, 58);
-  coinsSet.add(Kk(6, 56));
-  // catch stones: audit-generated (baked below by the build script)
-  for(const [c, r] of CATCH_STONES) fill(c, r);
-  // arc exits: every walled arc gets a punched down-exit (escapability audit)
-  for(const [c, r] of [[18, 34], [6, 45], [10, 45], [13, 45]]) solidSet.delete(Kk(c, r));
+  for(let c = 0; c < N; c++) if(c % 5 !== 1) BANDS[1].set.add(Kk(c, 19));
+  for(let c = 0; c < N; c++) if(c % 6 !== 3) BANDS[2].set.add(Kk(c, 17));
+  // ---- victory ring ----
+  for(let c = 0; c < N; c++){ fill(c, 10); fill(c, 11); }
+  // ---- the deck: one hole, one way in ----
+  for(let c = 0; c < N; c++) if(c !== 4) fill(c, 58);
+  // ---- room one: the gap (floor 52, arc 2..12) — the pad gets the key. then it gets you across ----
+  for(let c = 2; c <= 12; c++) if(c !== 8 && c !== 10) fill(c, 52);
+  doorSet.add(Kk(10, 52));
+  fill(8, 51);                                         // pit floor: the gap obstructs, it doesn't exit
+  for(let r = 53; r <= 57; r++){ fill(1, r); fill(13, r); }
+  pads.add(Kk(3, 52)); fill(9, 53);
+  fill(2, 54); keySet.add(Kk(2, 55));                  // the key pedestal, one drift west of the pad
+  coinsSet.add(Kk(4, 53)); coinsSet.add(Kk(8, 52)); coinsSet.add(Kk(9, 54)); coinsSet.add(Kk(11, 53)); coinsSet.add(Kk(12, 53));
+  // ---- rooms two..six: GENERATED layouts (seed 7, solver-certified: solvable, never stuck, twists forced) ----
+  const GEN = [{"name":"R2","S":["5,46","6,46","7,46","8,46","9,46","10,46","11,46","12,46","13,46","15,46","4,47","16,47","4,48","16,48","4,49","16,49","4,50","16,50","4,51","16,51","12,47","13,47","13,48","13,49","6,48","9,47","9,48"],"pads":["10,46","15,46"],"sticky":[],"wsticky":["13,47","13,48","13,49","9,47","9,48"],"spikes":[],"cracked":[],"doors":["14,46"],"keys":["6,49"],"coins":["12,48","9,49"],"mon":{"row":47,"c":5,"speed":1.6,"type":"mount"}},{"name":"R3","S":["10,35","11,35","12,35","13,35","14,35","15,35","16,35","17,35","18,35","7,36","19,36","7,37","19,37","7,38","19,38","7,40","19,40","7,41","19,41","7,42","19,42","7,43","19,43","7,44","19,44","7,45","19,45","10,37","18,36","18,37","18,38","8,44","13,36","16,43","15,43"],"pads":["12,35"],"sticky":[],"wsticky":["18,36","18,37","18,38"],"spikes":["13,37"],"cracked":[],"doors":[],"keys":[],"coins":["10,38","18,39","8,45"],"mon":null},{"name":"R4","S":["3,29","5,29","6,29","7,29","8,29","9,29","10,29","11,29","12,29","13,29","2,30","14,30","2,31","14,31","2,32","14,32","2,33","14,33","2,34","14,34","10,30","10,31","4,33","5,30","3,30","3,31","3,32"],"pads":["13,29"],"sticky":[],"wsticky":[],"spikes":["4,34"],"cracked":[],"doors":["4,29"],"keys":["12,30"],"coins":["3,33","5,31"],"mon":{"row":30,"c":4,"speed":1.7,"type":"mount"}},{"name":"R5","S":["2,22","3,22","4,22","5,22","6,22","7,22","8,22","9,22","10,22","11,22","12,22","1,23","13,23","1,24","13,24","1,25","13,25","1,26","13,26","1,27","13,27","1,28","13,28","8,27","11,25","2,23","2,24","2,25","6,23","6,24","9,23","9,24"],"pads":["3,22","10,22"],"sticky":[],"wsticky":["2,23","2,24","2,25","9,23","9,24"],"spikes":["2,26"],"cracked":["12,22"],"doors":[],"keys":[],"coins":["8,28","9,25","10,23","7,23"],"mon":{"row":23,"c":12,"speed":1.6,"type":"spiky"}},{"name":"R6","S":["0,14","1,14","2,14","3,14","4,14","5,14","6,14","7,14","8,14","9,14","10,14","11,14","12,14","13,14","14,14","15,14","18,14","19,14","10,15","10,16","17,15","17,16","7,15","7,16"],"pads":["2,14","9,14"],"sticky":[],"wsticky":["17,15","17,16"],"spikes":["17,17"],"cracked":["10,15"],"doors":[],"keys":[],"coins":["7,17","6,15"],"mon":null}];
+  for(const R of GEN){
+    for(const k of R.S) solidSet.add(k);
+    for(const k of R.pads) pads.add(k);
+    for(const k of R.sticky) sticky.add(k);
+    for(const k of R.wsticky || []) wallSticky.add(k);
+    for(const k of R.spikes) spikes.add(k);
+    for(const k of R.cracked) crackedSet.add(k);
+    for(const k of R.doors) doorSet.add(k);
+    for(const k of R.keys) keySet.add(k);
+    for(const k of R.coins) coinsSet.add(k);
+    if(R.mon) MONSTERS.push({ row: R.mon.row, c: R.mon.c, dir: 1, speed: R.mon.speed, state: 'alive', thawT: 0, grp: null, bodyMat: null, type: R.mon.type || 'normal', phase: 'happy', rideT: 0, lastCell: Math.round(R.mon.c), faces: null });
+  }
 
   // meshes
   clearGroup(); tower.add(hero); depthReg = [];
@@ -161,12 +199,32 @@ function buildWorld(){
   for(const key of solidSet){
     const [c, r] = key.split(',').map(Number);
     const isSand = sandSet.has(key);
-    const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: isSand ? 0xb89a5e : palette[(c + r) % 3] }));
+    const isCracked = crackedSet.has(key);
+    const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: isCracked ? 0x55504a : (isSand ? 0xb89a5e : palette[(c + r) % 3]) }));
     m.position.set(P[c][0] - 2.5, r + 0.5, P[c][1] - 2.5);
-    const el = edgeLine(isSand ? 0xe0c890 : 0x55688f); m.add(el);
+    const el = edgeLine(isCracked ? 0x8a7f6e : (isSand ? 0xe0c890 : 0x55688f)); m.add(el);
     const mats = [m.material, el.material];
+    if(isCracked){
+      for(const rz of [0.5, -0.7]){
+        const cr2 = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0x2e2a24 }));
+        cr2.scale.set(0.72, 1, 0.12); cr2.position.y = 0.505; cr2.rotation.y = rz;
+        m.add(cr2); mats.push(cr2.material);
+      }
+    }
     if(pads.has(key)){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0xffd34d })); p.position.y = 0.5; m.add(p); mats.push(p.material); }
     if(sticky.has(key)){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0x6ee37a })); p.position.y = -0.5; m.add(p); mats.push(p.material); }
+    if(wallSticky.has(key)){
+      for(const s2 of [1, -1]){
+        const ncc = mod(c + s2);
+        if(!solidSet.has(Kk(ncc, r))){
+          const dx = P[ncc][0] - P[c][0], dz = P[ncc][1] - P[c][1];
+          const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0x6ee37a }));
+          if(Math.abs(dx) > Math.abs(dz)) p.rotation.z = Math.PI / 2; else p.rotation.x = Math.PI / 2;
+          p.position.set(dx * 0.5, 0, dz * 0.5);
+          m.add(p); mats.push(p.material);
+        }
+      }
+    }
     tower.add(m); regDepth(m, mats);
     if(isSand) sandMeshes.push({ key, m }); else cubeList.push({ key, m });
   }
@@ -180,6 +238,66 @@ function buildWorld(){
     tower.add(m); regDepth(m, [m.material, lid.material, el.material]);
     chestMeshes.push({ key, m });
   }
+  doorMeshes = [];
+  for(const key of doorSet){
+    const [c, r] = key.split(',').map(Number);
+    const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0x252c40 }));
+    m.position.set(P[c][0] - 2.5, r + 0.5, P[c][1] - 2.5);
+    const seam = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0xe8c44a }));
+    seam.position.y = 0; m.add(seam);
+    const el = edgeLine(0xe8c44a); m.add(el);
+    const khMat = new THREE.MeshLambertMaterial({ color: 0x0d1018 });
+    for(let f2 = 0; f2 < 4; f2++){
+      const a2 = f2 * Math.PI / 2;
+      const kh = new THREE.Group();
+      const circ = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.02, 10), khMat);
+      circ.rotation.x = Math.PI / 2; circ.position.y = 0.07; kh.add(circ);
+      const stem = new THREE.Mesh(box, khMat);
+      stem.scale.set(0.07, 0.16, 0.02); stem.position.y = -0.05; kh.add(stem);
+      kh.rotation.y = a2;
+      kh.position.set(Math.sin(a2) * 0.512, 0, Math.cos(a2) * 0.512);
+      m.add(kh);
+    }
+    tower.add(m); regDepth(m, [m.material, seam.material, el.material]);
+    doorMeshes.push({ key, m });
+  }
+  countDoorMeshes = [];
+  for(const key of countDoorSet){
+    const [c, r] = key.split(',').map(Number);
+    const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0x252c40 }));
+    m.position.set(P[c][0] - 2.5, r + 0.5, P[c][1] - 2.5);
+    const seam = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0xffd34d }));
+    seam.position.y = 0; m.add(seam);
+    const mark = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0xffd34d }));
+    mark.scale.set(0.2, 0.2, 0.2); mark.rotation.z = Math.PI / 4; mark.position.y = 0.95; m.add(mark);
+    const el = edgeLine(0xffd34d); m.add(el);
+    tower.add(m); regDepth(m, [m.material, seam.material, el.material]);
+    countDoorMeshes.push({ key, m });
+  }
+  for(const M of MONSTERS){
+    const grp = new THREE.Group();
+    const COLS = { normal: [0x8f5fd4, 0xc9aef0], spiky: [0xc0455a, 0x6e2a38], mount: [0x4fae6f, 0x8fe3a8] };
+    const [bc2, cc2] = COLS[M.type] || COLS.normal;
+    const bm = new THREE.MeshLambertMaterial({ color: bc2 });
+    const body = new THREE.Mesh(box, bm); body.scale.set(0.82, 0.82, 0.82); grp.add(body);
+    const cap = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: cc2 }));
+    cap.scale.set(0.84, 1, 0.84); cap.position.y = 0.42; grp.add(cap);
+    body.add(edgeLine(0xd8c4f8));
+    if(M.type === 'spiky'){
+      const sm2 = new THREE.MeshLambertMaterial({ color: 0xe06a7e });
+      for(const [ox, oz] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]){
+        const sp = new THREE.Mesh(miniCone, sm2);
+        sp.position.set(ox, 0.56, oz); sp.rotation.y = Math.PI / 4; grp.add(sp);
+      }
+      M.faces = attachFaces(grp, 'frown', 'frown');
+    } else if(M.type === 'mount'){
+      M.faces = attachFaces(grp, 'happy', 'happy');
+    } else {
+      M.faces = attachFaces(grp, 'frown', 'happy');
+    }
+    tower.add(grp);
+    M.grp = grp; M.bodyMat = bm;
+  }
   for(const B of BANDS) for(const key of B.set){
     const [c, r] = key.split(',').map(Number);
     const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0x4a5a85 }));
@@ -187,58 +305,124 @@ function buildWorld(){
     regDepth(m, [m.material, el.material]);
     bandCubes.push({ B, c, r, m });
   }
+  const coinGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.07, 16); coinGeo.rotateX(Math.PI / 2);
+  const coinFace = new THREE.CylinderGeometry(0.19, 0.19, 0.078, 16); coinFace.rotateX(Math.PI / 2);
   for(const key of coinsSet){
     const [c, r] = key.split(',').map(Number);
-    const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0xffd34d }));
-    m.scale.set(0.3, 0.3, 0.3); m.rotation.z = Math.PI / 4;
+    const m = new THREE.Mesh(coinGeo, new THREE.MeshLambertMaterial({ color: 0xffd34d }));
+    const fc = new THREE.Mesh(coinFace, new THREE.MeshLambertMaterial({ color: 0xd9a13a }));
+    m.add(fc);
     m.position.set(P[c][0] - 2.5, r + 0.5, P[c][1] - 2.5);
-    const el = edgeLine(0xfff2b0); m.add(el); tower.add(m);
-    regDepth(m, [m.material, el.material]);
+    tower.add(m);
+    regDepth(m, [m.material, fc.material]);
     coinMeshes.push({ key, m });
   }
+  const ringGeo = new THREE.TorusGeometry(0.14, 0.045, 6, 12);
   for(const key of keySet){
     const [c, r] = key.split(',').map(Number);
-    const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0xe8c44a }));
-    m.scale.set(0.5, 0.18, 0.18);
+    const m = new THREE.Group();
+    const km = new THREE.MeshLambertMaterial({ color: 0xe8c44a });
+    const ring = new THREE.Mesh(ringGeo, km); ring.position.x = -0.22; m.add(ring);
+    const shaft = new THREE.Mesh(box, km); shaft.scale.set(0.42, 0.07, 0.07); shaft.position.x = 0.08; m.add(shaft);
+    const t1 = new THREE.Mesh(box, km); t1.scale.set(0.06, 0.14, 0.07); t1.position.set(0.26, -0.09, 0); m.add(t1);
+    const t2 = new THREE.Mesh(box, km); t2.scale.set(0.06, 0.1, 0.07); t2.position.set(0.16, -0.07, 0); m.add(t2);
     m.position.set(P[c][0] - 2.5, r + 0.45, P[c][1] - 2.5);
-    const el = edgeLine(0xfff2b0); m.add(el); tower.add(m);
-    regDepth(m, [m.material, el.material]);
+    tower.add(m);
+    regDepth(m, [km]);
     keyMeshes.push({ key, m });
   }
+  const coneGeo = new THREE.ConeGeometry(0.17, 0.45, 4);
   for(const key of spikes){
     const [c, r] = key.split(',').map(Number);
-    const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0xc0455a }));
-    m.scale.set(0.55, 0.42, 0.55); m.rotation.y = Math.PI / 4; m.rotation.x = Math.PI / 4;
-    m.position.set(P[c][0] - 2.5, r + 0.28, P[c][1] - 2.5);
-    tower.add(m); regDepth(m, [m.material]);
-    spikeMeshes.push({ key, m });
+    const grp = new THREE.Group();
+    grp.position.set(P[c][0] - 2.5, r, P[c][1] - 2.5);
+    const sm = new THREE.MeshLambertMaterial({ color: 0xc0455a });
+    const bm = new THREE.MeshLambertMaterial({ color: 0x6e2a38 });
+    const base = new THREE.Mesh(plate, bm); base.position.y = 0.04; grp.add(base);
+    for(const [ox, oz] of [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]]){
+      const sp = new THREE.Mesh(coneGeo, sm);
+      sp.position.set(ox, 0.26, oz); sp.rotation.y = Math.PI / 4; grp.add(sp);
+    }
+    tower.add(grp); regDepth(grp, [sm, bm]);
+    spikeMeshes.push({ key, m: grp });
   }
+}
+function removeCell(key){
+  const i = cubeList.findIndex(x => x.key === key);
+  if(i >= 0){ tower.remove(cubeList[i].m); cubeList.splice(i, 1); }
+}
+function openCountDoor(){
+  for(const { key, m } of countDoorMeshes){ countDoorSet.delete(key); tower.remove(m); }
+  countDoorMeshes = [];
+  showMsg("the room approves. the floor lets go.");
 }
 
 // --- run state ---
-let rot = 0, omega = 0, K = 2, heroY = 59, vy = 0, mode = 'ground', squash = 0, respawnT = 0, tip = 0, coinCount = 0, camLead = 0, hasKey = false, lockMsgCd = 0;
-const TOPPLE_A = 5.5, LEAN = 0.04;
+let rot = 0, omega = 0, K = 2, heroY = 59, vy = 0, mode = 'ground', squash = 0, respawnT = 0, tip = 0, coinCount = 0, camLead = 0, keyCount = 0, lockMsgCd = 0, ridingNow = false;
+let climbHold = 0, climbDir = 0, climbedOnce = false, yLag = 0, rotLag = 0, wallC = 0, wallSide = 0;
+let climbA = 0, rotLagInit = 0, climbPivot = null, climbAxis = null, climbFrom = null;
+const CLIMB_DUR = 0.18;
+let currentRoom = 0, bankCoins = 0, wonRun = false, r1CoinsLeft = 4, crackCreaked = false, spawnGuard = 0;
+const CRACK_V = 11;
+const TOPS = [58, 52, 46, 35, 29, 22];
+const ENTRIES = [[1, 59], [4, 53], [10, 47], [14, 36], [8, 30], [4, 23], [6, 15]];
+const ROOM_NAMES = ['the deck', 'room one: the gap', 'room two: the ledge', 'room three: the shaft', 'room four: the tenant', 'room five: the cracked floor', 'room six: the band run'];
+function roomIndex(y){ let i = 0; for(const t of TOPS) if(y < t + 0.95) i++; return i; }
+const TOPPLE_A = 5.5, LEAN = 0.04, ROTMAX = 2.0, CHASE_K = 12;
+let rotTarget = 0, carryFrom = 0, carryT = 0, carryDur = 0.32;
+let airCarry = 0, prevRot = 0, rotVel = 0, hangDir = 0, lastHangK = 0;
 const msgEl = document.getElementById('msg'), coinEl = document.getElementById('coins');
 let msgT = 0;
 function showMsg(t){ msgEl.textContent = t; msgT = 2.2; }
-function hud(){ coinEl.innerHTML = '&#9670; ' + coinCount + (hasKey ? ' &nbsp;&#128273;' : ''); }
+function hud(){ coinEl.innerHTML = '&#9670; ' + coinCount + (keyCount > 0 ? ' &nbsp;&#128273;&#215;' + keyCount : ''); }
 function die(what){
   if(mode === 'dead') return;
   mode = 'dead'; respawnT = 1.3;
-  showMsg(what + " again, from the top.");
+  showMsg(what + " again, from this room.");
+}
+function mountUnder(sup){
+  for(const M of MONSTERS){
+    if(M.type !== 'mount' || M.phase === 'frown' || M.state !== 'alive') continue;
+    if(M.row !== sup) continue;
+    const d = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
+    if(d < 0.6) return M;
+  }
+  return null;
+}
+function placeAt(cTarget, standY){
+  let d = ((cTarget - col()) % N + N) % N;
+  if(d > N / 2) d -= N;
+  K += d;
+  rot = -angOf(K); rotTarget = rot;
+  heroY = standY; vy = 0; mode = 'ground';
+  spawnGuard = 0.9;                      // a breath before the tenant counts
+}
+function resetCommon(){
+  airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0;
+  keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
 }
 function resetRun(msg){
-  buildWorld();
-  heroY = 59; vy = 0; mode = 'ground'; coinCount = 0; camLead = 0; hasKey = false;
+  buildWorld(); resetCommon();
+  coinCount = 0; camLead = 0; bankCoins = 0; currentRoom = 0; wonRun = false;
+  placeAt(ENTRIES[0][0], ENTRIES[0][1]);
+  hud(); showMsg(msg);
+}
+function resetRoom(){
+  buildWorld(); resetCommon();
+  coinCount = bankCoins;
+  const e = ENTRIES[currentRoom];
+  placeAt(e[0], e[1]);
   hud();
-  let bk = K; for(let g = 0; g < N; g++){ const a = -rot; if(a >= midOf(bk)) bk++; else if(a < midOf(bk - 1)) bk--; else break; }
-  K = bk;
-  showMsg(msg);
 }
 
 const col = () => mod(K);
 const rows = () => { const a = Math.floor(heroY + 0.02), b = Math.floor(heroY + 0.95); return a === b ? [a] : [a, b]; };
-function canEnter(k2){ const c = mod(k2); return rows().every(r => !solid(c, r)); }
+function canEnter(k2){
+  const c = mod(k2);
+  if(!rows().every(r => !solid(c, r))) return false;
+  if(mode === 'air' && vy < 0 && solid(c, Math.floor(heroY + 0.999))) return false;  // no sliding under ceilings mid-rise
+  return true;
+}
 function setRot(target){
   for(let guard = 0; guard < N * 2; guard++){
     const a = -target;
@@ -257,22 +441,29 @@ function setRot(target){
 
 // --- input ---
 let ptr = null, lastX = 0, lastT = 0, dragVel = 0, lastDrag = -1e9;
-const SENS = 0.0095;
-canvas.addEventListener('pointerdown', e => { e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); dragVel = 0; omega = 0; });
+const SENS = 0.007;
+canvas.addEventListener('pointerdown', e => { e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; });
 canvas.addEventListener('pointermove', e => {
   if(e.pointerId !== ptr) return;
   const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(8, now - lastT);
   if(Math.abs(dx) > 1.5) lastDrag = now;
-  setRot(rot + dx * SENS);
+  rotTarget += dx * SENS;
+  if(rotTarget - rot > 1.2) rotTarget = rot + 1.2;
+  else if(rotTarget - rot < -1.2) rotTarget = rot - 1.2;
   dragVel = (dx * SENS) / (dt / 1000);
   lastX = e.clientX; lastT = now;
 });
-function release(e){ if(e.pointerId === ptr){ ptr = null; omega = Math.max(-7, Math.min(7, dragVel)); } }
+function release(e){ if(e.pointerId === ptr){ ptr = null; omega = Math.max(-2.5, Math.min(2.5, dragVel)); } }
 canvas.addEventListener('pointerup', release);
 canvas.addEventListener('pointercancel', release);
 addEventListener('contextmenu', e => e.preventDefault());
+const redoEl = document.getElementById('redo');
+redoEl.addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation();
+  if(mode !== 'dead') die("you called it.");
+});
 const keys = {};
-addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key.toLowerCase() === 'r' && mode !== 'dead') die("you called it."); });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
 function collectAt(){
@@ -285,7 +476,7 @@ function collectAt(){
       showMsg("coin.");
     }
     if(keySet.has(key)){
-      keySet.delete(key); hasKey = true; hud();
+      keySet.delete(key); keyCount++; hud();
       const i = keyMeshes.findIndex(c => c.key === key);
       if(i >= 0){ tower.remove(keyMeshes[i].m); keyMeshes.splice(i, 1); }
       showMsg("a key. heavy, patient.");
@@ -297,12 +488,30 @@ function collectAt(){
 let last = 0;
 function frame(now){
   const dt = Math.min(0.05, (now - last) / 1000 || 0.016); last = now;
+  if(spawnGuard > 0) spawnGuard -= dt;
 
-  const driving = keys['arrowleft'] || keys['a'] || keys['arrowright'] || keys['d'] || (ptr !== null && (now - lastDrag) < 110);
-  if(keys['arrowleft'] || keys['a']) setRot(rot + 2.4 * dt);
-  else if(keys['arrowright'] || keys['d']) setRot(rot - 2.4 * dt);
-  else if(ptr === null && Math.abs(omega) > 0.02){ setRot(rot + omega * dt); omega *= Math.pow(0.08, dt); }
-  if(!driving && Math.abs(omega) <= 0.6){
+  const driving = keys['arrowleft'] || keys['a'] || keys['arrowright'] || keys['d']
+    || (ptr !== null && (now - lastDrag) < 110) || Math.abs(rotTarget - rot) > 0.02;
+  if(keys['arrowleft'] || keys['a']) rotTarget += 2.4 * dt;
+  else if(keys['arrowright'] || keys['d']) rotTarget -= 2.4 * dt;
+  else if(ptr === null && Math.abs(omega) > 0.02){ rotTarget += omega * dt; omega *= Math.pow(0.03, dt); }
+  // momentum launch: the throw keeps advancing the target while airborne
+  if(airCarry !== 0 && mode === 'air'){
+    const spanA = midOf(K) - midOf(K - 1);
+    rotTarget -= Math.sign(airCarry) * Math.abs(airCarry) * spanA * dt;
+    airCarry *= Math.pow(0.35, dt);
+    if(Math.abs(airCarry) < 0.6) airCarry = 0;
+  }
+  if(climbA > 0){ rotTarget = rot; omega = 0; }   // the vault owns this beat
+  // soft speed cap: rot chases the target, velocity saturates instead of snapping
+  const lagD = rotTarget - rot;
+  if(Math.abs(lagD) > 1e-5){
+    const vel = Math.sign(lagD) * Math.min(Math.abs(lagD) * CHASE_K, ROTMAX);
+    const want = rot + vel * dt;
+    setRot(want);
+    if(Math.abs(rot - want) > 1e-9){ rotTarget = rot; omega = 0; airCarry = 0; } // walls eat the backlog
+  }
+  if(!driving && Math.abs(omega) <= 0.6 && carryT <= 0 && !ridingNow){
     omega = 0;
     const hL = angOf(K) - midOf(K - 1), hR = midOf(K) - angOf(K);
     const da = (-rot) - angOf(K);
@@ -314,6 +523,7 @@ function frame(now){
       let ng = g + tip * dt;
       if(Math.sign(ng) !== Math.sign(g) || ng === 0){ ng = 0; tip = 0; squash = Math.max(squash, 0.12); }
       rot = -(angOf(K) + ng * (ng >= 0 ? 2 * hR : 2 * hL));
+      rotTarget = rot;
     } else tip = 0;
   } else tip = 0;
 
@@ -322,10 +532,88 @@ function frame(now){
     B.t += dt;
     if(B.anim > 0) B.anim = Math.max(0, B.anim - dt);
     if(B.t >= B.period){
-      B.t = 0; B.off += B.dir; B.anim = B.stepDur;
+      B.t = 0;
+      // a grounded rider on this band goes with the platform
+      let ride = false;
+      if(mode === 'ground'){
+        const sup = Math.floor(heroY + 0.02) - 1;
+        if(sup >= B.r0 && sup <= B.r1 && B.set.has(Kk(col() - B.off, sup))) ride = true;
+      }
+      B.off += B.dir; B.anim = B.stepDur;
+      if(ride && canEnter(K + B.dir)){
+        const d0 = angOf(K + B.dir) - angOf(K);
+        K += B.dir;
+        rot -= d0; rotTarget -= d0; rotLag += d0;   // commit the ride; the view glides after it
+      }
       for(let g = 0; g < 3; g++){
-        if(mode !== 'dead' && rows().some(r => r >= B.r0 && r <= B.r1) && !canEnter(K)){ K += B.dir; rot = -angOf(K); }
+        if(mode !== 'dead' && rows().some(r => r >= B.r0 && r <= B.r1) && !canEnter(K)){ K += B.dir; rot = -angOf(K); rotTarget = rot; }
         else break;
+      }
+    }
+  }
+  // ride tween: locked to the platform's ease, abandoned the moment the finger moves
+  if(carryT > 0){
+    if(ptr !== null && (now - lastDrag) < 110){ carryT = 0; }
+    else {
+      carryT = Math.max(0, carryT - dt);
+      const e = 1 - carryT / carryDur;
+      const ee = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
+      rot = carryFrom + (-angOf(K) - carryFrom) * ee;
+      rotTarget = rot;
+    }
+  }
+
+  // the tenant: patrol, contact, thaw
+  ridingNow = false;
+  for(const M of MONSTERS){
+    if(mode === 'dead') break;
+    if(M.state === 'alive'){
+      const cc = Math.round(M.c);
+      if(Math.abs(M.c - cc) < 0.03){
+        const nxt = mod(cc + M.dir);
+        if(solid(nxt, M.row) || !solid(nxt, M.row - 1)){ M.c = cc; M.dir *= -1; }
+      }
+      M.c += M.dir * M.speed * dt;
+      if(M.type === 'mount'){
+        const ridden = mode === 'ground' && Math.floor(heroY + 0.02) - 1 === M.row &&
+          Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2) < 0.6;
+        if(ridden){
+          ridingNow = true;
+          const ci2 = Math.floor(M.c);
+          const span2 = angOf(ci2 + 1) - angOf(ci2);
+          const dAng = M.dir * M.speed * dt * span2;
+          rot -= dAng; rotTarget -= dAng;
+        }
+        const cc3 = Math.round(M.c);
+        if(cc3 !== M.lastCell){
+          const stp = Math.sign(cc3 - M.lastCell);
+          if(ridden){
+            if(canEnter(K + stp)) K += stp;
+            else { rot = -angOf(K); rotTarget = rot; }
+          }
+          M.lastCell = cc3;
+        }
+        if(ridden && M.phase !== 'frown'){
+          M.rideT += dt;
+          const ph = M.rideT < 5 ? 'happy' : (M.rideT < 7 ? 'neutral' : 'frown');
+          if(ph !== M.phase){
+            M.phase = ph;
+            for(const fg of M.faces) setMouth(fg, ph);
+            if(ph === 'neutral') showMsg("its smile is fading.");
+            if(ph === 'frown') die("it stopped smiling.");
+          }
+        }
+      }
+      if(mode === 'ground' && Math.floor(heroY + 0.02) === M.row){
+        const d = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
+        if(d < 0.75 && spawnGuard <= 0 && (M.type !== 'mount' || M.phase === 'frown')) die("the tenant.");
+      }
+    } else {
+      M.thawT -= dt;
+      if(M.thawT <= 0){
+        solidSet.delete(Kk(M.c, M.row));
+        M.state = 'alive';
+        if(mode === 'ground' && col() === mod(M.c) && Math.floor(heroY + 0.02) === M.row + 1) die("it woke up.");
       }
     }
   }
@@ -350,6 +638,15 @@ function frame(now){
     const supKey = Kk(col(), sup);
     if(pads.has(supKey)){ vy = -14; mode = 'air'; squash = 0; showMsg("sproing."); }
     else if(spikes.has(Kk(col(), sup + 1))){ die("the spikes."); }
+    else if(doorSet.has(supKey)){
+      if(keyCount > 0){
+        doorSet.delete(supKey); keyCount--; hud();
+        const i = doorMeshes.findIndex(d => d.key === supKey);
+        if(i >= 0){ tower.remove(doorMeshes[i].m); doorMeshes.splice(i, 1); }
+        showMsg("the key turns. the floor lets go.");
+      } else if(lockMsgCd <= 0){ showMsg("locked underfoot. it wants a key."); lockMsgCd = 1.8; }
+    }
+    else if(mountUnder(sup)){ /* the mount carries; the patrol loop moves us */ }
     else if(!solid(col(), sup)){ mode = 'air'; vy = 0; }
     else if(sandSet.has(supKey) && !sandTimers.has(supKey)){ sandTimers.set(supKey, 0.45); showMsg("the sand gives."); }
     // the chest: push against it with the key
@@ -362,35 +659,136 @@ function frame(now){
         const s = Math.sign(g);
         const ck = Kk(K + s, Math.floor(heroY + 0.02));
         if(chestSet.has(ck)){
-          if(hasKey){
-            chestSet.delete(ck); hasKey = false; coinCount += 3; hud();
+          if(keyCount > 0){
+            chestSet.delete(ck); keyCount--; coinCount += 3; hud();
             const i = chestMeshes.findIndex(c => c.key === ck);
             if(i >= 0){ tower.remove(chestMeshes[i].m); chestMeshes.splice(i, 1); }
             showMsg("the chest opens. three coins.");
           } else if(lockMsgCd <= 0){ showMsg("locked. it wants a key."); lockMsgCd = 1.6; }
         }
       }
+      // climb: lean into a single block and step on top of it
+      if(Math.abs(g) > 0.035){
+        const s = Math.sign(g);
+        const nc = mod(K + s), r = Math.floor(heroY + 0.02);
+        const climbable = solid(nc, r) && !solid(nc, r + 1) && !solid(col(), r + 1) && !spikes.has(Kk(nc, r + 1));
+        if(!climbable && wallSticky.has(Kk(nc, r)) && solid(nc, r)){
+          if(climbDir !== s){ climbDir = s; climbHold = 0; }
+          climbHold += dt;
+          if(climbHold >= 0.1){
+            mode = 'wall'; wallC = nc; wallSide = s; climbHold = 0; tip = 0;
+            showMsg("the wall holds. up you go.");
+          }
+        } else if(climbable){
+          if(climbDir !== s){ climbDir = s; climbHold = 0; }
+          climbHold += dt;
+          if(climbHold >= 0.12){
+            const oc = mod(K), tc = mod(K + s);
+            K += s; heroY = r + 1; vy = 0;
+            rotLagInit = rot + angOf(K); rotLag = rotLagInit;  // world recenters on the vault's curve
+            rot = -angOf(K); rotTarget = rot;
+            climbA = CLIMB_DUR;
+            climbPivot = [(P[oc][0] + P[tc][0]) / 2 - 2.5, r + 1, (P[oc][1] + P[tc][1]) / 2 - 2.5];
+            climbFrom = [P[oc][0] - 2.5, r + 0.5, P[oc][1] - 2.5];
+            climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[tc][0] - P[oc][0], 0, P[tc][1] - P[oc][1])).normalize();
+            tip = 0; climbHold = 0;
+            if(!climbedOnce){ climbedOnce = true; showMsg("a single block. you step up."); }
+          }
+        } else climbHold = 0;
+      } else climbHold = 0;
+    }
+  }
+  if(mode === 'wall'){
+    const feet = Math.floor(heroY + 0.02);
+    if(!wallSticky.has(Kk(wallC, feet)) || !solid(wallC, feet)){
+      const topR = feet;
+      if(!solid(wallC, topR) && !spikes.has(Kk(wallC, topR))){
+        const oc = col(), tc = wallC, fromY = heroY - 0.5;
+        K += wallSide; heroY = topR; vy = 0; mode = 'ground';
+        rotLagInit = rot + angOf(K); rotLag = rotLagInit;
+        rot = -angOf(K); rotTarget = rot;
+        climbA = CLIMB_DUR;
+        climbPivot = [(P[oc][0] + P[tc][0]) / 2 - 2.5, topR, (P[oc][1] + P[tc][1]) / 2 - 2.5];
+        climbFrom = [P[oc][0] - 2.5, fromY, P[oc][1] - 2.5];
+        climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[tc][0] - P[oc][0], 0, P[tc][1] - P[oc][1])).normalize();
+        showMsg("over the lip.");
+      } else { mode = 'air'; vy = 0; }
+    } else if(!solid(col(), Math.floor(heroY + 0.999))){
+      heroY += 2.6 * dt;
+    }
+    if(mode === 'wall'){
+      const hW = angOf(K) - midOf(K - 1), hW2 = midOf(K) - angOf(K);
+      const daW = (-rot) - angOf(K);
+      const gW = daW >= 0 ? Math.min(0.5, daW / (2 * hW2)) : Math.max(-0.5, daW / (2 * hW));
+      if(Math.sign(gW) === -wallSide && Math.abs(gW) > 0.06){ mode = 'air'; vy = 0; showMsg("let go."); }
     }
   }
   if(mode === 'hang'){
-    if(!sticky.has(Kk(col(), Math.floor(heroY) + 1))){ mode = 'air'; vy = 0; showMsg("the ceiling lets go."); }
+    if(K !== lastHangK){ hangDir = Math.sign(K - lastHangK); lastHangK = K; }
+    if(!sticky.has(Kk(col(), Math.floor(heroY) + 1))){
+      mode = 'air'; vy = 0;
+      const spanH = midOf(K) - midOf(K - 1);
+      const cps = Math.abs(rotVel) / spanH;
+      if(cps > 2.5 && hangDir !== 0){
+        airCarry = Math.min(9, cps) * hangDir;
+        showMsg("launched.");
+      } else showMsg("the ceiling lets go.");
+    }
   }
   if(mode === 'air'){
     vy = Math.min(14, vy + 26 * dt);
     let ny = heroY - vy * dt;
     if(vy < 0){
       const head = Math.floor(ny + 0.999);
+      const prevHead = Math.floor(heroY + 0.999);
       if(solid(col(), head)){
-        if(sticky.has(Kk(col(), head))){ ny = head - 1; vy = 0; mode = 'hang'; squash = 0.14; showMsg("stuck. the ceiling holds you."); }
+        if(sticky.has(Kk(col(), head)) && head !== prevHead){ ny = head - 1; vy = 0; mode = 'hang'; squash = 0.14; airCarry = 0; hangDir = 0; lastHangK = K; showMsg("stuck. the ceiling holds you."); }
         else { ny = head - 1; vy = 0.5; }
       }
     } else {
       const r0 = Math.floor(ny + 0.02);
-      if(spikes.has(Kk(col(), r0 + 1)) && ny <= r0 + 1.05){
-        die("the spikes."); heroY = r0 + 1;
-      } else if(solid(col(), r0)){
-        ny = r0 + 1; vy = 0; mode = 'ground'; squash = 0.18;
-        if(pads.has(Kk(col(), r0))){ vy = -14; mode = 'air'; squash = 0; showMsg("sproing."); }
+      for(const M of MONSTERS){
+        if(M.state !== 'alive') continue;
+        const d = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
+        if(d < 0.6 && ny <= M.row + 1.08 && ny > M.row + 0.25 && vy > 2){
+          if(M.type === 'spiky'){ heroY = M.row + 1; die("its top is teeth too."); break; }
+          if(M.type === 'mount'){
+            if(M.phase === 'frown'){ heroY = M.row + 1; die("it stopped smiling."); break; }
+            ny = M.row + 1; vy = 0; mode = 'ground'; squash = 0.16; airCarry = 0;
+            if(M.rideT === 0) showMsg("it doesn't mind. for now.");
+            continue;
+          }
+          M.state = 'frozen'; M.c = mod(Math.round(M.c)); M.thawT = 6;
+          const under = Kk(M.c, M.row - 1);
+          if(crackedSet.has(under)){
+            crackedSet.delete(under); solidSet.delete(under); removeCell(under);
+            const inBand = rr => BANDS.some(B => rr >= B.r0 && rr <= B.r1);
+            let rr = M.row - 1;
+            while(rr > 1 && (inBand(rr) || inBand(rr - 1) || !solid(M.c, rr - 1))) rr--;
+            M.row = rr;
+            solidSet.add(Kk(M.c, M.row));
+            vy *= 0.6; squash = 0.1;
+            showMsg("it goes straight through. follow it.");
+          } else {
+            solidSet.add(Kk(M.c, M.row));
+            ny = M.row + 1; vy = 0; mode = 'ground'; squash = 0.2; airCarry = 0;
+            showMsg("frozen stiff. briefly.");
+          }
+        }
+      }
+      if(mode === 'air'){
+        const ck = Kk(col(), r0);
+        if(spikes.has(Kk(col(), r0 + 1)) && ny <= r0 + 1.05){
+          die("the spikes."); heroY = r0 + 1;
+        } else if(crackedSet.has(ck) && vy >= CRACK_V){
+          crackedSet.delete(ck); solidSet.delete(ck); removeCell(ck);
+          vy *= 0.6; squash = 0.1;
+          showMsg("it gives way.");
+        } else if(solid(col(), r0)){
+          ny = r0 + 1; vy = 0; mode = 'ground'; squash = 0.18; airCarry = 0;
+          if(crackedSet.has(ck)){ showMsg("it creaks. heavier."); }
+          if(pads.has(Kk(col(), r0))){ vy = -14; mode = 'air'; squash = 0; showMsg("sproing."); }
+        }
       }
     }
     heroY = ny;
@@ -398,14 +796,21 @@ function frame(now){
   if(mode !== 'dead') collectAt();
   if(squash > 0) squash = Math.max(0, squash - dt * 1.1);
 
-  if(heroY <= 2.05 && respawnT === 0){ respawnT = 1.2; showMsg("the bottom. for now."); }
+  if(mode !== 'dead'){
+    const ri = roomIndex(heroY);
+    if(ri > currentRoom){ currentRoom = ri; bankCoins = coinCount; showMsg(ROOM_NAMES[ri] + "."); }
+  }
+  if(heroY <= 12.06 && respawnT === 0){ respawnT = 1.2; wonRun = true; showMsg("the bottom. for now."); }
   if(respawnT > 0){
     respawnT -= dt;
-    if(respawnT <= 0){ respawnT = 0; resetRun("again, from the top."); }
+    if(respawnT <= 0){ respawnT = 0; if(wonRun) resetRun("again, from the top."); else resetRoom(); }
   }
 
+  rotVel = rotVel * 0.7 + ((rot - prevRot) / Math.max(dt, 1e-4)) * 0.3;
+  prevRot = rot;
+
   // render
-  tower.rotation.y = rot;
+  tower.rotation.y = rot + rotLag;
   for(const b of bandCubes){
     const di = b.c + b.B.off, [x1, z1] = P[mod(di)], [x0, z0] = P[mod(di - b.B.dir)];
     const e = b.B.anim > 0 ? 1 - (b.B.anim / b.B.stepDur) : 1;
@@ -414,7 +819,7 @@ function frame(now){
   }
   for(const cm of coinMeshes) cm.m.rotation.y += dt * 2.2;
   for(const km of keyMeshes) km.m.rotation.y += dt * 1.6;
-  const sR = Math.sin(rot), cR = Math.cos(rot);
+  const sR = Math.sin(rot + rotLag), cR = Math.cos(rot + rotLag);
   for(const dd of depthReg){
     if(!dd.mesh.parent) continue;
     const z2 = -dd.mesh.position.x * sR + dd.mesh.position.z * cR;
@@ -429,9 +834,40 @@ function frame(now){
     }
   }
 
+  const glow = keyCount > 0 ? 0.35 + 0.25 * Math.sin(now * 0.006) : 0;
+  for(const D of doorMeshes) D.m.material.emissive.setRGB(glow * 0.9, glow * 0.7, glow * 0.15);
+  for(const M of MONSTERS){
+    const i0 = Math.floor(M.c), f = M.c - i0;
+    const p0 = P[mod(i0)], p1 = P[mod(i0 + 1)];
+    const bob = M.state === 'alive' ? Math.sin(now * 0.004) * 0.05 : 0;
+    M.grp.position.set(p0[0] + (p1[0] - p0[0]) * f - 2.5, M.row + 0.5 + bob, p0[1] + (p1[1] - p0[1]) * f - 2.5);
+    if(M.state === 'frozen'){
+      M.bodyMat.color.setHex(0x9fd8ef);
+      const p2 = M.thawT < 1.6 ? 1 + Math.sin(now * 0.02) * 0.06 : 1;
+      M.grp.scale.set(p2, 1, p2);
+    } else {
+      M.bodyMat.color.setHex(M.type === 'spiky' ? 0xc0455a :
+        M.type === 'mount' ? (M.phase === 'frown' ? 0xc0455a : M.phase === 'neutral' ? 0xd4b75f : 0x4fae6f) : 0x8f5fd4);
+      M.grp.scale.set(1, 1, 1);
+    }
+  }
+
+  if(climbA > 0){
+    climbA = Math.max(0, climbA - dt);
+    const e2 = 1 - climbA / CLIMB_DUR;
+    const ee2 = e2 < 0.5 ? 2 * e2 * e2 : 1 - Math.pow(-2 * e2 + 2, 2) / 2;
+    const qv = new THREE.Quaternion().setFromAxisAngle(climbAxis, ee2 * Math.PI);
+    const vv = new THREE.Vector3(climbFrom[0] - climbPivot[0], climbFrom[1] - climbPivot[1], climbFrom[2] - climbPivot[2]).applyQuaternion(qv);
+    hero.position.set(climbPivot[0] + vv.x, climbPivot[1] + vv.y, climbPivot[2] + vv.z);
+    hero.quaternion.copy(qv);
+    hero.scale.set(0.92, 0.92, 0.92);
+    rotLag = rotLagInit * (1 - ee2);
+    if(climbA === 0){ squash = 0.14; rotLag = 0; }
+  } else {
+  rotLag *= Math.pow(1e-4, dt / 0.32); if(Math.abs(rotLag) < 1e-4) rotLag = 0;
   const hL2 = angOf(K) - midOf(K - 1), hR2 = midOf(K) - angOf(K);
   const da2 = (-rot) - angOf(K);
-  const g2 = da2 >= 0 ? Math.min(0.5, da2 / (2 * hR2)) : Math.max(-0.5, da2 / (2 * hL2));
+  const g2 = carryT > 0 ? 0 : (da2 >= 0 ? Math.min(0.5, da2 / (2 * hR2)) : Math.max(-0.5, da2 / (2 * hL2)));
   const sgn = g2 >= 0 ? 1 : -1;
   const c0 = P[col()], c1 = P[mod(K + sgn)];
   const d3 = new THREE.Vector3(c1[0] - c0[0], 0, c1[1] - c0[1]);
@@ -440,13 +876,15 @@ function frame(now){
   const axis = hang ? d3.clone().cross(up3).normalize() : up3.clone().cross(d3).normalize();
   const phi = Math.abs(g2) * Math.PI / 2;
   const q = new THREE.Quaternion().setFromAxisAngle(axis, phi);
-  const pvY = hang ? Math.floor(heroY) + 1 : heroY;
+  if(yLag < 0) yLag = Math.min(0, yLag + dt / 0.16);
+  const pvY = hang ? Math.floor(heroY) + 1 : heroY + yLag;
   const pivot = new THREE.Vector3(c0[0] - 2.5, pvY, c0[1] - 2.5).add(d3.clone().multiplyScalar(0.5));
   const off = d3.clone().multiplyScalar(-0.5).add(up3.clone().multiplyScalar(hang ? -0.5 : 0.5)).applyQuaternion(q);
   hero.position.copy(pivot.add(off));
   hero.position.y += hang ? squash * 0.4 : -squash * 0.4;
   hero.quaternion.copy(q);
   hero.scale.set(0.92 + squash * 0.5, 0.92 - squash * 0.8, 0.92 + squash * 0.5);
+  }
   hero.visible = mode !== 'dead';
 
   const leadT = (mode === 'air' && vy > 2) ? Math.min(3.5, vy * 0.3) : 0;
@@ -458,10 +896,8 @@ function frame(now){
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
-const CATCH_STONES = [[2, 51], [0, 51], [1, 51], [6, 47], [10, 47], [13, 47], [3, 5], [1, 27], [2, 47], [16, 27], [19, 27], [6, 22], [17, 51], [18, 51], [19, 51]];   // audit-generated: drops capped AND every position escapes alive
-buildWorld();
-showMsg("you arrive at the top.");
-hud();
+const CATCH_STONES = [];
+resetRun("six rooms between you and the bottom.");
 function resize(){
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
