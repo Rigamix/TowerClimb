@@ -20,6 +20,7 @@
 <div id="coins">&#9670; 0</div>
 <div id="redo">&#8635; room</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>window.TOWER_LEVEL = {"code":"ROOM rows=64 width=20\n....................\n....................\n.................o..\nS....o..K...o....#.#\n#...........#.......\n#.o....#P#.##.##..##\n#.#D#^^...#.#.#...m#\n#^......o.###P#^P###\nv#.....U#N#.........\n..SC................\n..............#U#...\nP#^^###P.[..#CHoH..#\n...###.].#.]o.K...#.\n...###.]o].[.....#..\n.....#.#.]o##.x.####\n#######.^####P###D##\n..#...#.....K..o....\n..#...#.....^####...\n..#...#..o..#..##^.#\n..#...#....####....[\n.##...#.o...#......[\n..#...#....##.######\n..#...#....#####..##\n###...###SP########D\n...#.#^##.#..#....#.\n...#.K...o####....#.\n...###v#..#..#....#.\n.o.#......####....#.\n...[#.....#..#....#.\n...[#..#.###.#....#.\n.x..#..#.....#....#.\n#########D####....SP\n......#.#..........#\n......#.#.#o.o....K#\n......#.#...#...####\n......#.#..ov#P#...#\n......#.#.#...v##..#\n......#.#.#...o.#..#\n......#.....@...#..#\n......###D#########S\n#......#..#.....####\n##.....#..#.#v^K....\n#......#..#....##...\n#.##...#..#o......##\n####...#..#.........\n].##.#.#..#........o\n]x.#...#..#.........\n#######S..########DP\n..K#.o.####....#....\n..#]......#....#....\n###].o...o#....#..##\n#.##......#....#..##\n#v.#......#....#..#.\n...#.#o.o.#....#..##\n..####..x.#....#....\n######P#S##....###D#\n##..^......^.......#\n...o#......#........\n.K..#......#......#.\nv#..#......#......#.\n.#..#......#......##\n.#.o#......#...#####\n.##.#......#.xo.....\n#####......S##P####D\nSTICK\n7,55 L\n17,60 L","dividers":[]};</script>
 <script>
 // ---------------------------------------------------------------------------
 // playground v3: the press is parked. the puzzle layer arrives —
@@ -156,8 +157,10 @@ function clearGroup(){
 let CUSTOM = null;
 function loadCustom(){
   const m = (location.hash || '').match(/[#&]play=([^&]+)/);
-  if(!m) return null;
-  let data; try { data = JSON.parse(decodeURIComponent(m[1])); } catch(e){ return null; }
+  let data = null;
+  if(m){ try { data = JSON.parse(decodeURIComponent(m[1])); } catch(e){} }
+  if(!data && window.TOWER_LEVEL && typeof window.TOWER_LEVEL === 'object') data = window.TOWER_LEVEL;   // baked-in level for deployment (a deploy index.html sets window.TOWER_LEVEL before this script)
+  if(!data) return null;
   const lines = (data.code || '').replace(/\r/g, '').split('\n').filter(l => l.length);
   let body = /^ROOM/.test(lines[0]) ? lines.slice(1) : lines;
   let stickLines = [];
@@ -845,7 +848,21 @@ function frame(now){
   }
   if(mode === 'hang'){
     if(K !== lastHangK){ hangDir = Math.sign(K - lastHangK); lastHangK = K; }
-    if(!sticky.has(Kk(col(), Math.floor(heroY) + 1))){
+    const ceilR = Math.floor(heroY) + 1;
+    // ceiling -> side: at the edge of the sticky ceiling, if you press toward a side whose block face is
+    // sticky and there's room, grab it and switch to wall-cling (then climb / flip onto the top as usual)
+    const hH = angOf(K) - midOf(K - 1), hH2 = midOf(K) - angOf(K);
+    const daH = (-rot) - angOf(K);
+    const gH = daH >= 0 ? Math.min(0.5, daH / (2 * hH2)) : Math.max(-0.5, daH / (2 * hH));
+    if(Math.abs(gH) > 0.06){
+      const s = Math.sign(gH), nc = mod(col() + s);
+      if(!sticky.has(Kk(nc, ceilR)) && wallSticky.has(Kk(col(), ceilR)) && !solid(nc, ceilR) && !spikes.has(Kk(nc, ceilR))){
+        K = nc; heroY = ceilR; vy = 0; mode = 'wall'; wallC = mod(K - s); wallSide = -s;
+        rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
+        showMsg("up the side.");
+      }
+    }
+    if(mode === 'hang' && !sticky.has(Kk(col(), ceilR))){
       mode = 'air'; vy = 0;
       const spanH = midOf(K) - midOf(K - 1);
       const cps = Math.abs(rotVel) / spanH;
