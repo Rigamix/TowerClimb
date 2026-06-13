@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>square playground v20 — slow is smooth</title>
+<title>square playground v44 — clean build</title>
 <style>
   html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#10141d;font-family:ui-monospace,Menlo,Consolas,monospace;touch-action:none;overscroll-behavior:none;}
   *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;}
@@ -15,7 +15,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hint">every floor is a problem. read it, solve it, drop. dying restarts the room.</div>
+<div id="hint"></div>
 <div id="msg"></div>
 <div id="coins">&#9670; 0</div>
 <div id="redo">&#8635; room</div>
@@ -42,6 +42,9 @@ for(let i = 0; i < N; i++){
 const TWO = Math.PI * 2;
 const angOf = K => ANG[((K % N) + N) % N] + TWO * Math.floor(K / N);
 const midOf = K => (angOf(K) + angOf(K + 1)) / 2;
+const angAt = p => { const f = Math.floor(p); return angOf(f) + (angOf(f + 1) - angOf(f)) * (p - f); };
+const Pat = p => { const f = ((Math.floor(p) % N) + N) % N, c = (f + 1) % N, fr = p - Math.floor(p);
+  return [P[f][0] + (P[c][0] - P[f][0]) * fr, P[f][1] + (P[c][1] - P[f][1]) * fr]; };
 const mod = c => ((c % N) + N) % N;
 const Kk = (c, r) => mod(c) + ',' + r;
 
@@ -139,7 +142,7 @@ hero.add(edgeLine(0xffe8b0));
 tower.add(hero);
 
 // --- world ---
-let solidSet, pads, sticky, wallSticky, sandSet, sandTimers, spikes, coinsSet, keySet, chestSet, doorSet, countDoorSet, crackedSet, MONSTERS, BANDS;
+let solidSet, pads, sticky, wallSticky, sandSet, sandTimers, spikes, cspikes, coinsSet, keySet, chestSet, doorSet, countDoorSet, crackedSet, MONSTERS, BANDS;
 let cubeList, coinMeshes, keyMeshes, bandCubes, spikeMeshes, sandMeshes, chestMeshes, doorMeshes, countDoorMeshes;
 function solid(c, r){
   if(r < 0) return true;
@@ -149,10 +152,76 @@ function solid(c, r){
 function clearGroup(){
   for(let i = tower.children.length - 1; i >= 0; i--){ const ch = tower.children[i]; if(ch !== hero) tower.remove(ch); }
 }
+// ---- custom level from the editor's "play" button (passed in the URL hash: game.html#play=<json>) ----
+let CUSTOM = null;
+function loadCustom(){
+  const m = (location.hash || '').match(/[#&]play=([^&]+)/);
+  if(!m) return null;
+  let data; try { data = JSON.parse(decodeURIComponent(m[1])); } catch(e){ return null; }
+  const lines = (data.code || '').replace(/\r/g, '').split('\n').filter(l => l.length);
+  let body = /^ROOM/.test(lines[0]) ? lines.slice(1) : lines;
+  let stickLines = [];
+  const si = body.findIndex(l => l.trim() === 'STICK');
+  if(si >= 0){ stickLines = body.slice(si + 1); body = body.slice(0, si); }   // per-face sticky section
+  if(!body.length) return null;
+  return { body, rows: body.length, BASE: 2, dividers: (data.dividers || []).filter(d => d > 0).sort((a, b) => a - b), stickLines };
+}
+function mkMon(c, wr, type){ return { row: wr, c, dir: 1, speed: 1.6, state: 'alive', thawT: 0, grp: null, bodyMat: null, type, phase: 'happy', rideT: 0, lastCell: c, faces: null }; }
+function populateCustom(){
+  BANDS = [];   // editor levels have no moving platforms
+  const { body, rows, BASE, dividers } = CUSTOM;
+  const bandFloors = [0]; for(const d of dividers) if(d > 0 && d < rows) bandFloors.push(d);   // editor floor row of each level band
+  const floorForRow = lr => { let f = 0; for(const d of bandFloors) if(d <= lr) f = d; return f; };
+  const spawn = {};
+  for(let lr = 0; lr < rows; lr++){
+    const line = body[(rows - 1) - lr] || '';     // body[0] = top row; local row 0 = bottom
+    const wr = lr + BASE;
+    for(let c = 0; c < N; c++){
+      const ch = line[c] || '.', k = Kk(c, wr);
+      switch(ch){
+        case '#': solidSet.add(k); break;
+        case 'S': solidSet.add(k); spawn[floorForRow(lr)] = [c, wr + 1]; break;
+        case 'O': break;                            // open hole — fall through
+        case 'D': doorSet.add(k); break;
+        case 'C': solidSet.add(k); crackedSet.add(k); break;
+        case 'N': solidSet.add(k); sandSet.add(k); break;   // sand: crumbles after you stand on it
+        case '^': solidSet.add(k); spikes.add(Kk(c, wr + 1)); break;
+        case 'v': solidSet.add(k); spikes.add(Kk(c, wr - 1)); cspikes.add(Kk(c, wr - 1)); break;
+        case 'P': solidSet.add(k); pads.add(k); break;
+        case 'U': solidSet.add(k); sticky.add(k); break;
+        case '[': case ']': solidSet.add(k); wallSticky.add(k); break;
+        case 'H': solidSet.add(k); wallSticky.add(k); sticky.add(k); break;
+        case 'o': coinsSet.add(k); break;
+        case 'K': keySet.add(k); break;
+        case 'x': MONSTERS.push(mkMon(c, wr, 'spiky')); break;
+        case 'm': MONSTERS.push(mkMon(c, wr, 'normal')); break;
+        case '@': MONSTERS.push(mkMon(c, wr, 'mount')); break;
+      }
+    }
+  }
+  for(const sl of (CUSTOM.stickLines || [])){   // per-face sticky → reuse wall-cling (side/outer/inner) + ceiling-hang (bottom)
+    const mm = sl.trim().match(/^(\d+),(\d+)\s+([TBLROI]+)$/); if(!mm) continue;
+    const c = +mm[1], wr = (+mm[2]) + BASE, f = mm[3];
+    if(f.includes('B')) sticky.add(Kk(c, wr));
+    if(/[LROI]/.test(f)) wallSticky.add(Kk(c, wr));
+  }
+  const floorsDesc = bandFloors.slice().sort((a, b) => b - a);   // top band first
+  CUSTOM.bands = floorsDesc.map(fEd => {
+    let e = spawn[fEd];
+    if(!e){ let sc = 0; for(let c = 0; c < N; c++) if(solidSet.has(Kk(c, fEd + BASE))){ sc = c; break; } e = [sc, fEd + BASE + 1]; }
+    return { floorWorld: fEd + BASE, entry: e };
+  });
+  CUSTOM.winY = BASE;   // fall below the bottom floor = you reached the bottom
+}
+function customBand(y){ const b = CUSTOM.bands; let i = 0; while(i < b.length - 1 && y <= b[i].floorWorld) i++; return i; }
 function buildWorld(){
   solidSet = new Set(); pads = new Set(); sticky = new Set(); wallSticky = new Set(); sandSet = new Set();
-  sandTimers = new Map(); spikes = new Set(); coinsSet = new Set(); keySet = new Set(); chestSet = new Set(); doorSet = new Set();
+  sandTimers = new Map(); spikes = new Set(); cspikes = new Set(); coinsSet = new Set(); keySet = new Set(); chestSet = new Set(); doorSet = new Set();
   countDoorSet = new Set(); crackedSet = new Set(); MONSTERS = [];
+  if(CUSTOM){ populateCustom(); }
+  else {
+  const ROOMTOP = { R2:52,R3:46,R4:35,R5:29,R6:22 }, ROOMFLOOR = { R2:46,R3:35,R4:29,R5:22,R6:14 };
+  const floorOf = n => ROOMFLOOR[n], topOf = n => ROOMTOP[n];
   BANDS = [
     { r0: 39, r1: 39, off: 0, t: 0, period: 1.15, stepDur: 0.32, anim: 0, dir: 1,  set: new Set() },
     { r0: 19, r1: 19, off: 0, t: 0, period: 2.1, stepDur: 0.32, anim: 0, dir: -1, set: new Set() },
@@ -179,18 +248,24 @@ function buildWorld(){
   fill(2, 54); keySet.add(Kk(2, 55));                  // the key pedestal, one drift west of the pad
   coinsSet.add(Kk(4, 53)); coinsSet.add(Kk(8, 52)); coinsSet.add(Kk(9, 54)); coinsSet.add(Kk(11, 53)); coinsSet.add(Kk(12, 53));
   // ---- rooms two..six: GENERATED layouts (seed 7, solver-certified: solvable, never stuck, twists forced) ----
-  const GEN = [{"name":"R2","S":["5,46","6,46","7,46","8,46","9,46","10,46","11,46","12,46","13,46","15,46","4,47","16,47","4,48","16,48","4,49","16,49","4,50","16,50","4,51","16,51","12,47","13,47","13,48","13,49","6,48","9,47","9,48"],"pads":["10,46","15,46"],"sticky":[],"wsticky":["13,47","13,48","13,49","9,47","9,48"],"spikes":[],"cracked":[],"doors":["14,46"],"keys":["6,49"],"coins":["12,48","9,49"],"mon":{"row":47,"c":5,"speed":1.6,"type":"mount"}},{"name":"R3","S":["10,35","11,35","12,35","13,35","14,35","15,35","16,35","17,35","18,35","7,36","19,36","7,37","19,37","7,38","19,38","7,40","19,40","7,41","19,41","7,42","19,42","7,43","19,43","7,44","19,44","7,45","19,45","10,37","18,36","18,37","18,38","8,44","13,36","16,43","15,43"],"pads":["12,35"],"sticky":[],"wsticky":["18,36","18,37","18,38"],"spikes":["13,37"],"cracked":[],"doors":[],"keys":[],"coins":["10,38","18,39","8,45"],"mon":null},{"name":"R4","S":["3,29","5,29","6,29","7,29","8,29","9,29","10,29","11,29","12,29","13,29","2,30","14,30","2,31","14,31","2,32","14,32","2,33","14,33","2,34","14,34","10,30","10,31","4,33","5,30","3,30","3,31","3,32"],"pads":["13,29"],"sticky":[],"wsticky":[],"spikes":["4,34"],"cracked":[],"doors":["4,29"],"keys":["12,30"],"coins":["3,33","5,31"],"mon":{"row":30,"c":4,"speed":1.7,"type":"mount"}},{"name":"R5","S":["2,22","3,22","4,22","5,22","6,22","7,22","8,22","9,22","10,22","11,22","12,22","1,23","13,23","1,24","13,24","1,25","13,25","1,26","13,26","1,27","13,27","1,28","13,28","8,27","11,25","2,23","2,24","2,25","6,23","6,24","9,23","9,24"],"pads":["3,22","10,22"],"sticky":[],"wsticky":["2,23","2,24","2,25","9,23","9,24"],"spikes":["2,26"],"cracked":["12,22"],"doors":[],"keys":[],"coins":["8,28","9,25","10,23","7,23"],"mon":{"row":23,"c":12,"speed":1.6,"type":"spiky"}},{"name":"R6","S":["0,14","1,14","2,14","3,14","4,14","5,14","6,14","7,14","8,14","9,14","10,14","11,14","12,14","13,14","14,14","15,14","18,14","19,14","10,15","10,16","17,15","17,16","7,15","7,16"],"pads":["2,14","9,14"],"sticky":[],"wsticky":["17,15","17,16"],"spikes":["17,17"],"cracked":["10,15"],"doors":[],"keys":[],"coins":["7,17","6,15"],"mon":null}];
+  const GEN = [{"name":"R2","S":["5,46","6,46","7,46","8,46","9,46","10,46","11,46","12,46","13,46","15,46","4,47","16,47","4,48","16,48","4,49","16,49","4,50","16,50","4,51","16,51","6,49","7,47","5,47","5,48","9,47","9,48","9,49","8,47"],"pads":["13,46"],"sticky":[],"wsticky":["5,47","5,48"],"spikes":[],"cracked":[],"doors":["14,46"],"keys":["5,49"],"coins":["8,48","7,48"],"mon":{"row":47,"c":15,"speed":1.7,"type":"mount"},"bandSticky":[]},{"name":"R3","S":["10,35","11,35","12,35","13,35","14,35","15,35","16,35","17,35","18,35","7,36","19,36","7,37","19,37","7,38","19,38","7,40","19,40","7,41","19,41","7,42","19,42","7,43","19,43","7,44","19,44","7,45","19,45","9,36","9,37","13,36","13,37","15,36","16,36","16,37","16,38"],"pads":["10,35"],"sticky":[],"wsticky":["16,36","16,37","16,38"],"spikes":[],"cracked":["9,36"],"doors":[],"keys":[],"coins":["16,39","14,36","8,36"],"mon":null,"bandSticky":[]},{"name":"R4","S":["3,29","5,29","6,29","7,29","8,29","9,29","10,29","11,29","12,29","13,29","2,30","14,30","2,31","14,31","2,32","14,32","2,33","14,33","2,34","14,34","12,30","6,30","3,33","13,30","13,32","12,32","11,32","10,32","10,30","10,31"],"pads":["7,29","5,29"],"sticky":[],"wsticky":["10,30","10,31","10,32"],"spikes":[],"cracked":["10,32"],"doors":["4,29"],"keys":["13,31"],"coins":["3,30"],"mon":{"row":30,"c":3,"speed":1.6,"type":"mount"},"bandSticky":[]},{"name":"R5","S":["2,22","3,22","4,22","5,22","6,22","7,22","8,22","9,22","10,22","11,22","12,22","1,23","13,23","1,24","13,24","1,25","13,25","1,26","13,26","1,27","13,27","1,28","13,28","3,26","5,23","5,24","6,23","6,24","6,25","6,26","7,26","8,26","9,26","2,23"],"pads":["12,22","10,22"],"sticky":[],"wsticky":["5,23","5,24","6,23","6,24","6,25","6,26"],"spikes":[],"cracked":["9,22"],"doors":[],"keys":[],"coins":["12,23","4,23"],"mon":{"row":23,"c":12,"speed":1.7,"type":"spiky"},"bandSticky":[]},{"name":"R6","S":["0,14","1,14","2,14","3,14","4,14","5,14","6,14","7,14","8,14","9,14","10,14","11,14","12,14","13,14","14,14","15,14","18,14","19,14","18,15","18,16","7,15","19,15","19,16","16,15","16,16","5,15","5,16","13,15"],"pads":["10,14","12,14"],"sticky":[],"wsticky":["16,15","16,16","19,15","19,16"],"spikes":["16,17","18,17"],"cracked":["16,15"],"doors":[],"keys":[],"coins":["12,16","7,16","15,15"],"mon":null,"bandSticky":[1]}];
   for(const R of GEN){
     for(const k of R.S) solidSet.add(k);
     for(const k of R.pads) pads.add(k);
     for(const k of R.sticky) sticky.add(k);
     for(const k of R.wsticky || []) wallSticky.add(k);
     for(const k of R.spikes) spikes.add(k);
+    for(const k of R.cspikes || []){ spikes.add(k); cspikes.add(k); }   // ceiling spikes: lethal like any spike, but you hit them rising
     for(const k of R.cracked) crackedSet.add(k);
     for(const k of R.doors) doorSet.add(k);
     for(const k of R.keys) keySet.add(k);
     for(const k of R.coins) coinsSet.add(k);
     if(R.mon) MONSTERS.push({ row: R.mon.row, c: R.mon.c, dir: 1, speed: R.mon.speed, state: 'alive', thawT: 0, grp: null, bodyMat: null, type: R.mon.type || 'normal', phase: 'happy', rideT: 0, lastCell: Math.round(R.mon.c), faces: null });
+    if(R.bandSticky && R.bandSticky.length){
+      const roomBands = BANDS.filter(B => B.r0 > floorOf(R.name) && B.r0 < topOf(R.name));
+      for(const bi of R.bandSticky){ if(roomBands[bi]) roomBands[bi].bottomSticky = true; }
+    }
+  }
   }
 
   // meshes
@@ -213,6 +288,8 @@ function buildWorld(){
     }
     if(pads.has(key)){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0xffd34d })); p.position.y = 0.5; m.add(p); mats.push(p.material); }
     if(sticky.has(key)){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0x6ee37a })); p.position.y = -0.5; m.add(p); mats.push(p.material); }
+    // band underside sticky strip
+    for(const B of BANDS){ if(B.bottomSticky && B.set.has(Kk(c - B.off, r))){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0x6ee37a })); p.position.y = -0.5; p.rotation.x = Math.PI; m.add(p); mats.push(p.material); } }
     if(wallSticky.has(key)){
       for(const s2 of [1, -1]){
         const ncc = mod(c + s2);
@@ -334,14 +411,15 @@ function buildWorld(){
   const coneGeo = new THREE.ConeGeometry(0.17, 0.45, 4);
   for(const key of spikes){
     const [c, r] = key.split(',').map(Number);
+    const down = cspikes.has(key);                 // ceiling spike: hang from the top, point down
     const grp = new THREE.Group();
     grp.position.set(P[c][0] - 2.5, r, P[c][1] - 2.5);
     const sm = new THREE.MeshLambertMaterial({ color: 0xc0455a });
     const bm = new THREE.MeshLambertMaterial({ color: 0x6e2a38 });
-    const base = new THREE.Mesh(plate, bm); base.position.y = 0.04; grp.add(base);
+    const base = new THREE.Mesh(plate, bm); base.position.y = down ? 0.46 : 0.04; grp.add(base);
     for(const [ox, oz] of [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]]){
       const sp = new THREE.Mesh(coneGeo, sm);
-      sp.position.set(ox, 0.26, oz); sp.rotation.y = Math.PI / 4; grp.add(sp);
+      sp.position.set(ox, down ? 0.24 : 0.26, oz); sp.rotation.x = down ? Math.PI : 0; sp.rotation.y = Math.PI / 4; grp.add(sp);
     }
     tower.add(grp); regDepth(grp, [sm, bm]);
     spikeMeshes.push({ key, m: grp });
@@ -354,7 +432,7 @@ function removeCell(key){
 function openCountDoor(){
   for(const { key, m } of countDoorMeshes){ countDoorSet.delete(key); tower.remove(m); }
   countDoorMeshes = [];
-  showMsg("the room approves. the floor lets go.");
+  /* silent */
 }
 
 // --- run state ---
@@ -370,10 +448,12 @@ const ROOM_NAMES = ['the deck', 'room one: the gap', 'room two: the ledge', 'roo
 function roomIndex(y){ let i = 0; for(const t of TOPS) if(y < t + 0.95) i++; return i; }
 const TOPPLE_A = 5.5, LEAN = 0.04, ROTMAX = 2.0, CHASE_K = 12;
 let rotTarget = 0, carryFrom = 0, carryT = 0, carryDur = 0.32;
+let carrier = null, rideFrac = null, rideSteer = 0, justLeft = null;
+let jlTimer = 0;
 let airCarry = 0, prevRot = 0, rotVel = 0, hangDir = 0, lastHangK = 0;
 const msgEl = document.getElementById('msg'), coinEl = document.getElementById('coins');
 let msgT = 0;
-function showMsg(t){ msgEl.textContent = t; msgT = 2.2; }
+function showMsg(t){ /* messages disabled */ }
 function hud(){ coinEl.innerHTML = '&#9670; ' + coinCount + (keyCount > 0 ? ' &nbsp;&#128273;&#215;' + keyCount : ''); }
 function die(what){
   if(mode === 'dead') return;
@@ -381,11 +461,16 @@ function die(what){
   showMsg(what + " again, from this room.");
 }
 function mountUnder(sup){
+  if(solid(col(), sup)) return null;
+  // already bound? stay bound (frown still holds you, lethal). No latch dependency.
+  if(carrier && carrier.row === sup && carrier.state === 'alive') return carrier;
+  // (no global latch; we refuse only the specific mount just dismounted, below)
   for(const M of MONSTERS){
     if(M.type !== 'mount' || M.phase === 'frown' || M.state !== 'alive') continue;
+    if(M === justLeft) continue;               // don't instantly re-grab the one we just stepped off
     if(M.row !== sup) continue;
     const d = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
-    if(d < 0.6) return M;
+    if(d < 0.95) return M;
   }
   return null;
 }
@@ -398,19 +483,20 @@ function placeAt(cTarget, standY){
   spawnGuard = 0.9;                      // a breath before the tenant counts
 }
 function resetCommon(){
-  airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0;
+  airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
 }
 function resetRun(msg){
   buildWorld(); resetCommon();
   coinCount = 0; camLead = 0; bankCoins = 0; currentRoom = 0; wonRun = false;
-  placeAt(ENTRIES[0][0], ENTRIES[0][1]);
+  const e0 = CUSTOM ? CUSTOM.bands[0].entry : ENTRIES[0];
+  placeAt(e0[0], e0[1]);
   hud(); showMsg(msg);
 }
 function resetRoom(){
   buildWorld(); resetCommon();
   coinCount = bankCoins;
-  const e = ENTRIES[currentRoom];
+  const e = CUSTOM ? (CUSTOM.bands[currentRoom] || CUSTOM.bands[CUSTOM.bands.length - 1]).entry : ENTRIES[currentRoom];
   placeAt(e[0], e[1]);
   hud();
 }
@@ -433,7 +519,7 @@ function setRot(target){
     if(!canEnter(K + 1)) hi = angOf(K) + 2 * hR * LEAN;
     if(!canEnter(K - 1)) lo = angOf(K) - 2 * hL * LEAN;
     const ca = Math.min(hi, Math.max(lo, a));
-    if(ca !== a){ rot = -ca; omega = 0; return; }
+    if(ca !== a){ rotLag += (rot - (-ca)); rot = -ca; omega = 0; return; }
     rot = target; return;
   }
   rot = target;
@@ -441,24 +527,25 @@ function setRot(target){
 
 // --- input ---
 let ptr = null, lastX = 0, lastT = 0, dragVel = 0, lastDrag = -1e9;
-const SENS = 0.007;
-canvas.addEventListener('pointerdown', e => { e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; });
-canvas.addEventListener('pointermove', e => {
+const SENS = 0.0058;
+window.addEventListener('pointerdown', e => { if(e.target.id === 'redo') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
+window.addEventListener('pointermove', e => {
   if(e.pointerId !== ptr) return;
   const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(8, now - lastT);
   if(Math.abs(dx) > 1.5) lastDrag = now;
-  rotTarget += dx * SENS;
+  if(carrier){ rideSteer += dx * SENS * 1.5; }
+  else rotTarget += dx * SENS;
   if(rotTarget - rot > 1.2) rotTarget = rot + 1.2;
   else if(rotTarget - rot < -1.2) rotTarget = rot - 1.2;
   dragVel = (dx * SENS) / (dt / 1000);
   lastX = e.clientX; lastT = now;
 });
-function release(e){ if(e.pointerId === ptr){ ptr = null; omega = Math.max(-2.5, Math.min(2.5, dragVel)); } }
-canvas.addEventListener('pointerup', release);
-canvas.addEventListener('pointercancel', release);
+function release(e){ if(e.pointerId === ptr){ ptr = null; omega = Math.max(-1.6, Math.min(1.6, dragVel)); } }
+window.addEventListener('pointerup', release);
+window.addEventListener('pointercancel', release);
 addEventListener('contextmenu', e => e.preventDefault());
 const redoEl = document.getElementById('redo');
-redoEl.addEventListener('pointerdown', e => {
+redoEl.addEventListener('pointerdown', e => { e.stopPropagation();
   e.preventDefault(); e.stopPropagation();
   if(mode !== 'dead') die("you called it.");
 });
@@ -489,10 +576,19 @@ let last = 0;
 function frame(now){
   const dt = Math.min(0.05, (now - last) / 1000 || 0.016); last = now;
   if(spawnGuard > 0) spawnGuard -= dt;
+  // clear the 'just left' block once we're no longer on that mount's row near it
+  if(justLeft){
+    jlTimer -= dt;
+    if(jlTimer <= 0) justLeft = null;
+  }
 
   const driving = keys['arrowleft'] || keys['a'] || keys['arrowright'] || keys['d']
     || (ptr !== null && (now - lastDrag) < 110) || Math.abs(rotTarget - rot) > 0.02;
-  if(keys['arrowleft'] || keys['a']) rotTarget += 2.4 * dt;
+  if(carrier){
+    // on a mount: arrow/A/D nudges the dismount accumulator instead of rolling the world
+    if(keys['arrowleft'] || keys['a']) rideSteer += 5.5 * dt;
+    else if(keys['arrowright'] || keys['d']) rideSteer -= 5.5 * dt;
+  } else if(keys['arrowleft'] || keys['a']) rotTarget += 2.4 * dt;
   else if(keys['arrowright'] || keys['d']) rotTarget -= 2.4 * dt;
   else if(ptr === null && Math.abs(omega) > 0.02){ rotTarget += omega * dt; omega *= Math.pow(0.03, dt); }
   // momentum launch: the throw keeps advancing the target while airborne
@@ -503,15 +599,19 @@ function frame(now){
     if(Math.abs(airCarry) < 0.6) airCarry = 0;
   }
   if(climbA > 0){ rotTarget = rot; omega = 0; }   // the vault owns this beat
-  // soft speed cap: rot chases the target, velocity saturates instead of snapping
-  const lagD = rotTarget - rot;
-  if(Math.abs(lagD) > 1e-5){
-    const vel = Math.sign(lagD) * Math.min(Math.abs(lagD) * CHASE_K, ROTMAX);
-    const want = rot + vel * dt;
-    setRot(want);
-    if(Math.abs(rot - want) > 1e-9){ rotTarget = rot; omega = 0; airCarry = 0; } // walls eat the backlog
+  // soft speed cap: rot chases the target, velocity saturates instead of snapping.
+  // SKIP entirely while riding a mount — the ride block owns rot and K; setRot() here would
+  // nudge K and fight the carry, spinning the cube.
+  if(!carrier){
+    const lagD = rotTarget - rot;
+    if(Math.abs(lagD) > 1e-5){
+      const vel = Math.sign(lagD) * Math.min(Math.abs(lagD) * CHASE_K, ROTMAX);
+      const want = rot + vel * dt;
+      setRot(want);
+      if(Math.abs(rot - want) > 1e-9){ rotTarget = rot; omega = 0; airCarry = 0; }
+    }
   }
-  if(!driving && Math.abs(omega) <= 0.6 && carryT <= 0 && !ridingNow){
+  if(!driving && !carrier && Math.abs(omega) <= 0.6 && carryT <= 0 && !ridingNow){
     omega = 0;
     const hL = angOf(K) - midOf(K - 1), hR = midOf(K) - angOf(K);
     const da = (-rot) - angOf(K);
@@ -533,11 +633,14 @@ function frame(now){
     if(B.anim > 0) B.anim = Math.max(0, B.anim - dt);
     if(B.t >= B.period){
       B.t = 0;
-      // a grounded rider on this band goes with the platform
+      // a grounded rider on top, or a hanger on a sticky underside, goes with the platform
       let ride = false;
       if(mode === 'ground'){
         const sup = Math.floor(heroY + 0.02) - 1;
         if(sup >= B.r0 && sup <= B.r1 && B.set.has(Kk(col() - B.off, sup))) ride = true;
+      } else if(mode === 'hang'){
+        const hr = Math.floor(heroY + 0.999);
+        if(hr >= B.r0 && hr <= B.r1 && B.bottomSticky && B.set.has(Kk(col() - B.off, hr))) ride = true;
       }
       B.off += B.dir; B.anim = B.stepDur;
       if(ride && canEnter(K + B.dir)){
@@ -564,7 +667,7 @@ function frame(now){
   }
 
   // the tenant: patrol, contact, thaw
-  ridingNow = false;
+  ridingNow = false; rideFrac = null; if(!carrier) rideSteer = 0;
   for(const M of MONSTERS){
     if(mode === 'dead') break;
     if(M.state === 'alive'){
@@ -575,38 +678,45 @@ function frame(now){
       }
       M.c += M.dir * M.speed * dt;
       if(M.type === 'mount'){
-        const ridden = mode === 'ground' && Math.floor(heroY + 0.02) - 1 === M.row &&
-          Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2) < 0.6;
+        const ridden = carrier === M && mode === 'ground' &&
+          Math.abs(Math.floor(heroY + 0.02) - 1 - M.row) <= 0;
         if(ridden){
           ridingNow = true;
-          const ci2 = Math.floor(M.c);
-          const span2 = angOf(ci2 + 1) - angOf(ci2);
-          const dAng = M.dir * M.speed * dt * span2;
-          rot -= dAng; rotTarget -= dAng;
-        }
-        const cc3 = Math.round(M.c);
-        if(cc3 !== M.lastCell){
-          const stp = Math.sign(cc3 - M.lastCell);
-          if(ridden){
-            if(canEnter(K + stp)) K += stp;
-            else { rot = -angOf(K); rotTarget = rot; }
+          if(Math.abs(rideSteer) >= 1){
+            const sstep = rideSteer > 0 ? 1 : -1;
+            rideSteer = 0;
+            if(canEnter(K + sstep)){ justLeft = carrier; jlTimer = 0.9; K += sstep; carrier = null; rideFrac = null; mode = 'air'; vy = -8; }
           }
-          M.lastCell = cc3;
+          if(carrier === M){
+            const cc3 = Math.round(M.c);
+            if(cc3 !== M.lastCell){
+              const sstep2 = Math.sign(cc3 - M.lastCell);
+              if(canEnter(K + sstep2)){ K += sstep2; M.lastCell = cc3; }
+              else { M.c = M.lastCell; M.dir *= -1; }
+            }
+            const base = K - mod(K);
+            let frac = base + mod(M.c);
+            if(frac - K > N / 2) frac -= N; else if(frac - K < -N / 2) frac += N;
+            rideFrac = frac;
+            rot = -angAt(frac); rotTarget = rot;
+          }
         }
-        if(ridden && M.phase !== 'frown'){
+        if(ridden){
           M.rideT += dt;
-          const ph = M.rideT < 5 ? 'happy' : (M.rideT < 7 ? 'neutral' : 'frown');
+          const ph = M.rideT < 1 ? 'happy' : (M.rideT < 2 ? 'neutral' : 'frown');
           if(ph !== M.phase){
             M.phase = ph;
             for(const fg of M.faces) setMouth(fg, ph);
-            if(ph === 'neutral') showMsg("its smile is fading.");
-            if(ph === 'frown') die("it stopped smiling.");
           }
+          if(M.rideT >= 3) die("it turned.");
         }
       }
       if(mode === 'ground' && Math.floor(heroY + 0.02) === M.row){
         const d = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
         if(d < 0.75 && spawnGuard <= 0 && (M.type !== 'mount' || M.phase === 'frown')) die("the tenant.");
+      }
+      if(M.type === 'mount' && carrier !== M && M.rideT !== 0 && mode !== 'ground'){
+        M.rideT = 0; if(M.phase !== 'happy'){ M.phase = 'happy'; for(const fg of M.faces) setMouth(fg, 'happy'); }
       }
     } else {
       M.thawT -= dt;
@@ -635,6 +745,7 @@ function frame(now){
 
   if(mode === 'ground'){
     const sup = Math.floor(heroY + 0.02) - 1;
+    if(carrier && solid(col(), sup)){ carrier = null; rideFrac = null; rideSteer = 0; }   // stepped onto solid floor: stop riding
     const supKey = Kk(col(), sup);
     if(pads.has(supKey)){ vy = -14; mode = 'air'; squash = 0; showMsg("sproing."); }
     else if(spikes.has(Kk(col(), sup + 1))){ die("the spikes."); }
@@ -646,9 +757,12 @@ function frame(now){
         showMsg("the key turns. the floor lets go.");
       } else if(lockMsgCd <= 0){ showMsg("locked underfoot. it wants a key."); lockMsgCd = 1.8; }
     }
-    else if(mountUnder(sup)){ /* the mount carries; the patrol loop moves us */ }
-    else if(!solid(col(), sup)){ mode = 'air'; vy = 0; }
-    else if(sandSet.has(supKey) && !sandTimers.has(supKey)){ sandTimers.set(supKey, 0.45); showMsg("the sand gives."); }
+    else if(mountUnder(sup)){
+      const Mu = mountUnder(sup);
+      if(carrier !== Mu){ carrier = Mu; rideSteer = 0; Mu.c = col(); Mu.lastCell = col(); }   // fresh bind
+    }
+    else if(!solid(col(), sup)){ mode = 'air'; vy = 0; carrier = null; }
+    else if(sandSet.has(supKey) && !sandTimers.has(supKey)){ sandTimers.set(supKey, 2.0); showMsg("the sand gives."); }
     // the chest: push against it with the key
     if(mode === 'ground'){
       if(lockMsgCd > 0) lockMsgCd -= dt;
@@ -671,7 +785,13 @@ function frame(now){
       if(Math.abs(g) > 0.035){
         const s = Math.sign(g);
         const nc = mod(K + s), r = Math.floor(heroY + 0.02);
-        const climbable = solid(nc, r) && !solid(nc, r + 1) && !solid(col(), r + 1) && !spikes.has(Kk(nc, r + 1));
+        let climbable = solid(nc, r) && !solid(nc, r + 1) && !solid(col(), r + 1) && !spikes.has(Kk(nc, r + 1));
+        if(!climbable){
+          for(const Mc of MONSTERS){
+            const body = Mc.state === 'frozen' || (Mc.type === 'mount' && Mc.phase !== 'frown');
+            if(body && Mc.row === r && Math.abs(((nc - Mc.c + N/2)%N+N)%N - N/2) < 0.6 && !solid(nc, r + 1) && !solid(col(), r + 1)){ climbable = true; break; }
+          }
+        }
         if(!climbable && wallSticky.has(Kk(nc, r)) && solid(nc, r)){
           if(climbDir !== s){ climbDir = s; climbHold = 0; }
           climbHold += dt;
@@ -741,7 +861,8 @@ function frame(now){
     if(vy < 0){
       const head = Math.floor(ny + 0.999);
       const prevHead = Math.floor(heroY + 0.999);
-      if(solid(col(), head)){
+      if(cspikes.has(Kk(col(), head)) && head !== prevHead){ die("the ceiling spikes."); ny = head; }   // rose into down-pointing spikes
+      else if(solid(col(), head)){
         if(sticky.has(Kk(col(), head)) && head !== prevHead){ ny = head - 1; vy = 0; mode = 'hang'; squash = 0.14; airCarry = 0; hangDir = 0; lastHangK = K; showMsg("stuck. the ceiling holds you."); }
         else { ny = head - 1; vy = 0.5; }
       }
@@ -797,10 +918,10 @@ function frame(now){
   if(squash > 0) squash = Math.max(0, squash - dt * 1.1);
 
   if(mode !== 'dead'){
-    const ri = roomIndex(heroY);
-    if(ri > currentRoom){ currentRoom = ri; bankCoins = coinCount; showMsg(ROOM_NAMES[ri] + "."); }
+    const ri = CUSTOM ? customBand(heroY) : roomIndex(heroY);
+    if(ri > currentRoom){ currentRoom = ri; bankCoins = coinCount; if(!CUSTOM) showMsg(ROOM_NAMES[ri] + "."); }
   }
-  if(heroY <= 12.06 && respawnT === 0){ respawnT = 1.2; wonRun = true; showMsg("the bottom. for now."); }
+  if(heroY <= (CUSTOM ? CUSTOM.winY : 12.06) && respawnT === 0){ respawnT = 1.2; wonRun = true; showMsg(CUSTOM ? "you reached the bottom." : "the bottom. for now."); }
   if(respawnT > 0){
     respawnT -= dt;
     if(respawnT <= 0){ respawnT = 0; if(wonRun) resetRun("again, from the top."); else resetRoom(); }
@@ -846,8 +967,18 @@ function frame(now){
       const p2 = M.thawT < 1.6 ? 1 + Math.sin(now * 0.02) * 0.06 : 1;
       M.grp.scale.set(p2, 1, p2);
     } else {
-      M.bodyMat.color.setHex(M.type === 'spiky' ? 0xc0455a :
-        M.type === 'mount' ? (M.phase === 'frown' ? 0xc0455a : M.phase === 'neutral' ? 0xd4b75f : 0x4fae6f) : 0x8f5fd4);
+      if(M.type === 'mount' && M.phase === 'frown'){
+        const t = Math.max(0, Math.min(1, M.rideT - 2));
+        const freq = 6 + t * 22;
+        const blink = 0.5 + 0.5 * Math.sin(M.rideT * freq);
+        const c = new THREE.Color(0xff2a2a).lerp(new THREE.Color(0xffffff), blink * (0.4 + 0.6 * t));
+        M.bodyMat.color.copy(c);
+        M.grp.scale.setScalar(1 + 0.08 * t * blink);
+      } else {
+        M.bodyMat.color.setHex(M.type === 'spiky' ? 0xc0455a :
+          M.type === 'mount' ? (M.phase === 'neutral' ? 0xd4b75f : 0x4fae6f) : 0x8f5fd4);
+        M.grp.scale.setScalar(1);
+      }
       M.grp.scale.set(1, 1, 1);
     }
   }
@@ -866,10 +997,11 @@ function frame(now){
   } else {
   rotLag *= Math.pow(1e-4, dt / 0.32); if(Math.abs(rotLag) < 1e-4) rotLag = 0;
   const hL2 = angOf(K) - midOf(K - 1), hR2 = midOf(K) - angOf(K);
-  const da2 = (-rot) - angOf(K);
-  const g2 = carryT > 0 ? 0 : (da2 >= 0 ? Math.min(0.5, da2 / (2 * hR2)) : Math.max(-0.5, da2 / (2 * hL2)));
+  const erot = rot + rotLag;            // the angle actually shown this frame
+  const da2 = (-erot) - angOf(K);
+  const g2 = (carryT > 0 || carrier) ? 0 : (da2 >= 0 ? Math.min(0.5, da2 / (2 * hR2)) : Math.max(-0.5, da2 / (2 * hL2)));
   const sgn = g2 >= 0 ? 1 : -1;
-  const c0 = P[col()], c1 = P[mod(K + sgn)];
+  const c0 = (carrier && rideFrac !== null) ? Pat(rideFrac) : P[col()], c1 = P[mod(K + sgn)];
   const d3 = new THREE.Vector3(c1[0] - c0[0], 0, c1[1] - c0[1]);
   const up3 = new THREE.Vector3(0, 1, 0);
   const hang = mode === 'hang';
@@ -897,7 +1029,8 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 const CATCH_STONES = [];
-resetRun("six rooms between you and the bottom.");
+CUSTOM = loadCustom();
+resetRun(CUSTOM ? "your level — get to the bottom." : "six rooms between you and the bottom.");
 function resize(){
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
