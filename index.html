@@ -154,6 +154,24 @@ const hero = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0xd9a13a
 hero.scale.set(0.92, 0.92, 0.92);
 hero.add(edgeLine(0xffe8b0));
 tower.add(hero);
+// #3: a subtle dashed guide showing where the hero will fall/land (a child of the tower so it rotates with the column)
+const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x6fc7ff, transparent: true, opacity: 0.45, dashSize: 0.28, gapSize: 0.22 }));
+trajLine.frustumCulled = false; trajLine.visible = false; tower.add(trajLine);
+function updateTrajectory(){
+  if(mode !== 'air'){ if(trajLine.visible) trajLine.visible = false; return; }
+  const c = col(), x = P[c][0] - 2.5, z = P[c][1] - 2.5;
+  let y = heroY, v = vy; const pts = []; const dt2 = 0.03, floorY = (CUSTOM ? CUSTOM.winY : 12) - 1.5;
+  for(let i = 0; i < 90; i++){
+    pts.push(new THREE.Vector3(x, y + 0.5, z));
+    v = Math.min(14, v + 26 * dt2);
+    const ny = y - v * dt2;
+    if(v > 0){ const r0 = Math.floor(ny + 0.02); if(solid(c, r0)){ pts.push(new THREE.Vector3(x, r0 + 1.5, z)); break; } }   // first solid below = landing spot
+    y = ny;
+    if(y < floorY) break;
+  }
+  if(pts.length > 2){ trajLine.geometry.setFromPoints(pts); trajLine.computeLineDistances(); trajLine.visible = true; }
+  else trajLine.visible = false;
+}
 
 // --- world ---
 let solidSet, pads, sticky, wallSticky, faceSet, sandSet, sandTimers, spikes, cspikes, coinsSet, keySet, chestSet, doorSet, countDoorSet, crackedSet, MONSTERS, BANDS;
@@ -165,7 +183,7 @@ function solid(c, r){
 }
 function faced(c, r, F){ return faceSet.has(Kk(c, r) + ',' + F); }   // single-sided sticky test (the painted face exists here)
 function clearGroup(){
-  for(let i = tower.children.length - 1; i >= 0; i--){ const ch = tower.children[i]; if(ch !== hero) tower.remove(ch); }
+  for(let i = tower.children.length - 1; i >= 0; i--){ const ch = tower.children[i]; if(ch !== hero && ch !== trajLine) tower.remove(ch); }
 }
 // ---- custom level from the editor's "play" button (passed in the URL hash: game.html#play=<json>) ----
 let CUSTOM = null;
@@ -459,7 +477,7 @@ function openCountDoor(){
 let rot = 0, omega = 0, K = 2, heroY = 59, vy = 0, mode = 'ground', squash = 0, respawnT = 0, tip = 0, coinCount = 0, camLead = 0, keyCount = 0, lockMsgCd = 0, ridingNow = false;
 let climbHold = 0, climbDir = 0, climbedOnce = false, yLag = 0, rotLag = 0, wallC = 0, wallSide = 0;
 let climbA = 0, rotLagInit = 0, climbPivot = null, climbAxis = null, climbFrom = null;
-const CLIMB_DUR = 0.18;
+const CLIMB_DUR = 0.26;           // block-vault roll (#8: a bit slower so it eases instead of snapping)
 const CLING_TURN = 0.30;          // cling corner turns ease a touch slower than the block-vault, for smoothness
 // sticky cling: ONE mode that replaces wall+hang. clCell=the painted block [c,r], clFace=B/L/R/O/I,
 // clT=climb height, clSign=which push direction climbs UP (kept continuous across corners), clFacing=last move dir,
@@ -1171,6 +1189,7 @@ function frame(now){
     if(glowTarget){ const ng = cubeList.find(x => x.key === glowTarget); if(ng) ng.m.material.emissive.setRGB(0.14, 0.13, 0.08); }
     glowKey = glowTarget;
   }
+  updateTrajectory();   // #3: draw/refresh the fall guide
 
   const leadT = (mode === 'air' && vy > 2) ? Math.min(3.5, vy * 0.3) : 0;
   camLead += (leadT - camLead) * Math.min(1, dt * 5);
