@@ -155,24 +155,28 @@ hero.scale.set(0.92, 0.92, 0.92);
 hero.add(edgeLine(0xffe8b0));
 tower.add(hero);
 // #3: a subtle dashed guide showing where the hero will fall/land (a child of the tower so it rotates with the column)
-const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x6fc7ff, transparent: true, opacity: 0.22, dashSize: 0.28, gapSize: 0.22 }));   // #2: 50% more transparent
+const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x6fc7ff, transparent: true, opacity: 0.12, dashSize: 0.28, gapSize: 0.22 }));   // #2: fainter still + only shown when the path curves sideways
 trajLine.frustumCulled = false; trajLine.visible = false; tower.add(trajLine);
 // #1: glow ONLY the top face of the block under the hero (a plate, not the whole cube)
 const glowPlate = new THREE.Mesh(plate, new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.5 }));
 glowPlate.visible = false; tower.add(glowPlate);
 function updateTrajectory(){
   if(mode !== 'air'){ if(trajLine.visible) trajLine.visible = false; return; }
-  const c = col(), x = P[c][0] - 2.5, z = P[c][1] - 2.5;
-  let y = heroY, v = vy; const pts = []; const dt2 = 0.03, floorY = (CUSTOM ? CUSTOM.winY : 12) - 1.5;
-  for(let i = 0; i < 90; i++){
-    pts.push(new THREE.Vector3(x, y + 0.5, z));
+  let y = heroY, v = vy, fcol = K;                                            // fcol = continuous column; it drifts sideways with the launch momentum
+  let colRate = Math.max(-6, Math.min(6, airCarry));                          // sideways drift (cols/sec) — matches the air airCarry term, capped to the chase speed
+  const pts = []; const dt2 = 0.03, floorY = (CUSTOM ? CUSTOM.winY : 12) - 1.5;
+  const startCol = fcol; let landed = false;
+  for(let i = 0; i < 120; i++){
+    const p = Pat(fcol); pts.push(new THREE.Vector3(p[0] - 2.5, y + 0.5, p[1] - 2.5));
+    fcol += colRate * dt2; colRate *= Math.pow(0.35, dt2); if(Math.abs(colRate) < 0.05) colRate = 0;   // drift decays like airCarry
     v = Math.min(14, v + 26 * dt2);
     const ny = y - v * dt2;
-    if(v > 0){ const r0 = Math.floor(ny + 0.02); if(solid(c, r0)){ pts.push(new THREE.Vector3(x, r0 + 1.5, z)); break; } }   // first solid below = landing spot
+    if(v > 0){ const r0 = Math.floor(ny + 0.02); if(solid(mod(Math.round(fcol)), r0)){ const pl = Pat(fcol); pts.push(new THREE.Vector3(pl[0] - 2.5, r0 + 1.5, pl[1] - 2.5)); landed = true; break; } }   // first solid below = landing spot
     y = ny;
     if(y < floorY) break;
   }
-  if(pts.length > 2){ trajLine.geometry.setFromPoints(pts); trajLine.computeLineDistances(); trajLine.visible = true; }
+  // #2: only show the guide when the path actually CURVES sideways (>~0.4 col of drift); a straight vertical bounce/fall needs no guide
+  if(landed && pts.length > 2 && Math.abs(fcol - startCol) > 0.4){ trajLine.geometry.setFromPoints(pts); trajLine.computeLineDistances(); trajLine.visible = true; }
   else trajLine.visible = false;
 }
 
@@ -485,7 +489,7 @@ const CLING_TURN = 0.30;          // cling corner turns ease a touch slower than
 // sticky cling: ONE mode that replaces wall+hang. clCell=the painted block [c,r], clFace=B/L/R/O/I,
 // clT=climb height, clSign=which push direction climbs UP (kept continuous across corners), clFacing=last move dir,
 // clGuard=brief no-regrab timer after letting go, clCamPull=eased camera dolly-back while on an outer (O) face.
-let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clReleaseT = 1, clDropTarget = 0, clPivX = 0, clPivY = 0, clPivZ = 0;
+let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clReleaseT = 1, clDropTarget = 0, clPivX = 0, clPivY = 0, clPivZ = 0, clVaultTop = false;
 let camCornerPull = 0;
 let sandKey = null, sandT = 0;   // the sand block currently being stood on + how long (resets when you step off)
 let padCombo = 0, padArmKey = null, padArmT = 0;   // jump-pad: consecutive-bounce counter (2,3,4,5 sq) + a settle timer so a fresh bounce waits until the bottom is flat
@@ -534,7 +538,7 @@ function placeAt(cTarget, standY){
 }
 function resetCommon(){
   airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
-  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0;   // never respawn mid-cling
+  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0; clVaultTop = false;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
 }
 function resetRun(msg){
@@ -629,7 +633,7 @@ function collectAt(){
 // --- sticky cling: attach / detach / smooth face-change snap (reuses the vault swing the player already loves) ---
 function clAttach(bc, br, F, sign){
   bc = mod(bc);
-  mode = 'cling'; clCell = [bc, br]; clFace = F;
+  mode = 'cling'; clCell = [bc, br]; clFace = F; clVaultTop = false;
   clSign = sign || 1; clFacing = sign || 1;
   vy = 0; tip = 0; climbHold = 0; airCarry = 0; omega = 0;
   let d = ((clHeroCol(bc, F) - col()) % N + N) % N; if(d > N / 2) d -= N; K += d;   // center the hero's column
@@ -929,7 +933,8 @@ function frame(now){
       } else climbHold = 0;
     }
   }
-  if(mode === 'cling'){
+  if(mode === 'cling' && clVaultTop && clAnim <= 0){ mode = 'ground'; vy = 0; clCell = null; clFace = null; clVaultTop = false; }   // item 1b: the roll-over-the-top finished -> stand on the block as ground
+  if(mode === 'cling' && !clVaultTop){
     let [bc, br] = clCell;
     if(!solid(bc, br) || !faced(bc, br, clFace)){ clDetach('peel'); }       // the block or its painted face is gone
     else if(climbA <= 0 && clAnim <= 0){                                     // (while a corner-turn ease plays, it owns the hero)
@@ -950,12 +955,12 @@ function frame(now){
                 const F1 = isTop ? 'T' : 'B'; clFace = F2; heroY = clT = isTop ? br + 1 : br;   // arrive at the side's TOP (from a top) or BOTTOM (from a ceiling)
                 const hcN = clHeroCol(bc, F2); let dd = ((hcN - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd;
                 clFacing = s; clSnap(F1, F2, bc, br); showMsg("around the corner.");
-              } else { if(clFresh) clDetach('slip'); }                        // nothing connected: fresh press lets go, held crawl holds at the edge
+              } else { clDetach('slip'); }                                    // nothing connected: a continued crawl carries you off the edge
             }
           }
         }
       } else {
-        // ----- VERTICAL face (L/R/O/I): LEFT walks one way around the block, RIGHT the other; wrap to the next sticky face or dismount -----
+        // ----- VERTICAL face (L/R/O/I): LEFT/RIGHT climb up/down; at the TOP or BOTTOM of the wall, wrap/vault NOW (never climb into the empty space past the block) -----
         const steer = rotTarget - rot;                                       // fed by keys (left/a => +) AND touch-drag AND flick momentum
         const upLeft = (clFace === 'L' || clFace === 'O');                    // on these, the CCW direction climbs UP (a consistent walk around the block)
         const vF = clFace;                                                   // the wall face we're on (for the corner-roll edge geometry)
@@ -963,26 +968,31 @@ function frame(now){
         if(steer > 0.004) dir = upLeft ? 1 : -1; else if(steer < -0.004) dir = upLeft ? -1 : 1;
         rotTarget = rot;                                                      // a wall never spins the tower
         if(dir !== 0){
-          // is there a sticky surface to go to that way? (the wall continues, or a top/underside to wrap onto)
-          const destUp = (faced(bc, br + 1, clFace) && solid(bc, br + 1)) || faced(bc, br, 'T');
-          const destDn = (faced(bc, br - 1, clFace) && solid(bc, br - 1)) || faced(bc, br, 'B');
-          if((dir > 0 && !destUp) || (dir < 0 && !destDn)){ if(clFresh) clDetach('slip'); }   // nothing that way: a FRESH press lets go; a HELD push just holds (you must release & press again)
-          else { clT += dir * CLING_SPD * dt; clFacing = dir; }
+          const upWall = faced(bc, br + 1, clFace) && solid(bc, br + 1);      // the same wall continues one block up...
+          const dnWall = faced(bc, br - 1, clFace) && solid(bc, br - 1);      // ...or down
+          if(dir > 0){                                                        // pushing UP
+            if(upWall){ clT += CLING_SPD * dt; clFacing = 1; }                // climb the continuing wall (the block hand-off happens below)
+            else {                                                            // reached the TOP of the wall -> act AT the corner, don't drift up into empty space
+              heroY = clT = br;                                               // sit at the aligned top so the roll/hop starts on the edge
+              if(faced(bc, br, 'T')){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); showMsg("onto the top."); }   // sticky top -> wrap onto it
+              else if(!solid(bc, br + 1)){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); clVaultTop = true; showMsg("over the top."); }   // item 1b: roll up & over onto the block's own (clear) top, then stand on it
+              else clDetach('slip');                                          // nowhere to go -> let go
+            }
+          } else {                                                            // pushing DOWN
+            if(dnWall){ clT -= CLING_SPD * dt; clFacing = -1; }
+            else {                                                            // reached the BOTTOM of the wall
+              heroY = clT = br;
+              if(faced(bc, br, 'B')){ clFace = 'B'; heroY = clT = br - 1; clSnap(vF, 'B', bc, br); showMsg("under the ledge."); }   // sticky underside -> wrap under it
+              else clDetach('slip');
+            }
+          }
         }
         if(mode === 'cling'){
           heroY = clT;
-          const hc = col(), feet = Math.floor(heroY + 0.02);
-          if(spikes.has(Kk(hc, feet))){ die("the spikes."); }
-          else if(feet > br){                                                   // climbed up to the next block of a taller wall -> continue / wrap onto its top
-            if(faced(bc, br + 1, clFace) && solid(bc, br + 1)){ clCell = [bc, br + 1]; }
-            else if(faced(bc, br, 'T')){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); showMsg("onto the top."); }
-            else clDetach('slip');
-          }
-          else if(feet < br){                                                   // climbed down to the next block -> continue / wrap under it
-            if(faced(bc, br - 1, clFace) && solid(bc, br - 1)){ clCell = [bc, br - 1]; }
-            else if(faced(bc, br, 'B')){ clFace = 'B'; heroY = clT = br - 1; clSnap(vF, 'B', bc, br); showMsg("under the ledge."); }
-            else clDetach('slip');
-          }
+          const feet = Math.floor(heroY + 0.02);
+          if(spikes.has(Kk(col(), feet))){ die("the spikes."); }
+          else if(feet > br && faced(bc, br + 1, clFace) && solid(bc, br + 1)){ clCell = [bc, br + 1]; }   // climbed up onto the next wall block
+          else if(feet < br && faced(bc, br - 1, clFace) && solid(bc, br - 1)){ clCell = [bc, br - 1]; }   // climbed down onto the next
         }
       }
     }
