@@ -593,7 +593,7 @@ window.addEventListener('pointermove', e => {
   const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(8, now - lastT);
   if(Math.abs(dx) > 1.5) lastDrag = now;
   if(carrier){ rideSteer += dx * SENS * 1.5; }
-  else rotTarget += dx * SENS * (mode === 'cling' && clFace === 'T' ? -1 : 1);   // sticky-top: same flip as the keys, so dragging walks you consistently around the block
+  else rotTarget += dx * SENS * (mode === 'cling' ? (clFace === 'T' ? 1 : -1) : 1);   // cling controls are SCREEN-RELATIVE: drag/press toward the block to climb up-and-over it (T re-flips so the top keeps the same sense)
   if(rotTarget - rot > 1.2) rotTarget = rot + 1.2;
   else if(rotTarget - rot < -1.2) rotTarget = rot - 1.2;
   dragVel = (dx * SENS) / (dt / 1000);
@@ -685,8 +685,9 @@ function frame(now){
     // on a mount: arrow/A/D nudges the dismount accumulator instead of rolling the world
     if(keys['arrowleft'] || keys['a']) rideSteer += 5.5 * dt;
     else if(keys['arrowright'] || keys['d']) rideSteer -= 5.5 * dt;
-  } else if(keys['arrowleft'] || keys['a']) rotTarget += 2.4 * dt * (mode === 'cling' && clFace === 'T' ? -1 : 1);   // on a sticky TOP, flip left/right so the walk keeps going the same way around the block (no bounce)
-  else if(keys['arrowright'] || keys['d']) rotTarget -= 2.4 * dt * (mode === 'cling' && clFace === 'T' ? -1 : 1);
+  } else if(keys['arrowleft'] || keys['a']) rotTarget += 2.4 * dt * (mode === 'cling' ? (clFace === 'T' ? 1 : -1) : 1);   // cling is SCREEN-RELATIVE: press toward the block to climb up-and-over (so RIGHT climbs a wall on your right); T re-flips for the top
+
+  else if(keys['arrowright'] || keys['d']) rotTarget -= 2.4 * dt * (mode === 'cling' ? (clFace === 'T' ? 1 : -1) : 1);
   else if(ptr === null && Math.abs(omega) > 0.02){ rotTarget += omega * dt; omega *= Math.pow(0.03, dt); }
   // momentum launch: the throw keeps advancing the target while airborne
   if(airCarry !== 0 && mode === 'air'){
