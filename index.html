@@ -464,7 +464,8 @@ const CLING_TURN = 0.30;          // cling corner turns ease a touch slower than
 // sticky cling: ONE mode that replaces wall+hang. clCell=the painted block [c,r], clFace=B/L/R/O/I,
 // clT=climb height, clSign=which push direction climbs UP (kept continuous across corners), clFacing=last move dir,
 // clGuard=brief no-regrab timer after letting go, clCamPull=eased camera dolly-back while on an outer (O) face.
-let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59;
+let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clPushPrev = false;
+let camCornerPull = 0, glowKey = null;
 const CLING_SPD = 2.6;
 let currentRoom = 0, bankCoins = 0, wonRun = false, r1CoinsLeft = 4, crackCreaked = false, spawnGuard = 0;
 const CRACK_V = 11;
@@ -510,7 +511,7 @@ function placeAt(cTarget, standY){
 }
 function resetCommon(){
   airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
-  clCell = null; clFace = null; clGuard = 0; clCamPull = 0;   // never respawn mid-cling
+  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; glowKey = null;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
 }
 function resetRun(msg){
@@ -906,7 +907,7 @@ function frame(now){
                 const F1 = isTop ? 'T' : 'B'; clFace = F2; heroY = clT = isTop ? br + 1 : br;   // arrive at the side's TOP (from a top) or BOTTOM (from a ceiling)
                 const hcN = clHeroCol(bc, F2); let dd = ((hcN - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd;
                 clFacing = s; clSnap(F1, F2, bc, br); showMsg("around the corner.");
-              } else clDetach('slip');                                        // nothing connected -> let go
+              } else { if(!clPushPrev) clDetach('slip'); }                    // nothing connected: fresh press lets go, held crawl holds at the edge
             }
           }
         }
@@ -922,7 +923,7 @@ function frame(now){
           // is there a sticky surface to go to that way? (the wall continues, or a top/underside to wrap onto)
           const destUp = (faced(bc, br + 1, clFace) && solid(bc, br + 1)) || faced(bc, br, 'T');
           const destDn = (faced(bc, br - 1, clFace) && solid(bc, br - 1)) || faced(bc, br, 'B');
-          if((dir > 0 && !destUp) || (dir < 0 && !destDn)) clDetach('slip');     // nothing that way -> unhook NOW, from where you are (no sliding to the edge first)
+          if((dir > 0 && !destUp) || (dir < 0 && !destDn)){ if(!clPushPrev) clDetach('slip'); }   // nothing that way: a FRESH press lets go; a HELD push just holds (you must release & press again)
           else { clT += dir * CLING_SPD * dt; clFacing = dir; }
         }
         if(mode === 'cling'){
@@ -1147,16 +1148,30 @@ function frame(now){
   }
   hero.visible = mode !== 'dead';
 
+  // #7: subtle glow on the block the hero stands on / hovers over — but not while clinging to a sticky surface
+  let glowTarget = null;
+  if(mode === 'ground' || mode === 'air'){
+    for(let r = Math.floor(heroY + 0.02) - 1; r >= 0 && r > heroY - 6; r--){ if(solid(col(), r)){ glowTarget = Kk(col(), r); break; } }
+  }
+  if(glowTarget !== glowKey){
+    if(glowKey){ const og = cubeList.find(x => x.key === glowKey); if(og) og.m.material.emissive.setRGB(0, 0, 0); }
+    if(glowTarget){ const ng = cubeList.find(x => x.key === glowTarget); if(ng) ng.m.material.emissive.setRGB(0.14, 0.13, 0.08); }
+    glowKey = glowTarget;
+  }
+
   const leadT = (mode === 'air' && vy > 2) ? Math.min(3.5, vy * 0.3) : 0;
   camLead += (leadT - camLead) * Math.min(1, dt * 5);
   camFocusY += (heroY - camFocusY) * Math.min(1, dt * 8);                     // smoothed focus so cling-wrap heroY jumps don't snap the camera
   const onO = (mode === 'cling' && clFace === 'O');
   clCamPull += ((onO ? 1 : 0) - clCamPull) * Math.min(1, dt * 3);             // smooth ease in/out on outer faces
-  const camZ = 13 + clCamPull * 3.4;                                          // pull back to reveal the tower's exterior
+  const cornerDist = Math.min(...[0, 5, 10, 15].map(c => Math.abs(((col() - c + 10) % 20 + 20) % 20 - 10)));   // columns to the nearest tower corner
+  camCornerPull += (Math.max(0, 1 - cornerDist / 2) - camCornerPull) * Math.min(1, dt * 3);   // gentle pull-back near a corner to see around it, then ease back
+  const camZ = 14.5 + clCamPull * 3.4 + camCornerPull * 2.0;                  // 14.5 = a touch further back overall (#5); + corner pull-back (#4) + outer-face reveal
   const camY = camera.position.y || camFocusY + 4;
   camera.position.set(0, camY + (camFocusY + 4.2 + clCamPull * 2.2 - camLead - camY) * Math.min(1, dt * 4), camZ);
   camera.lookAt(0, camFocusY + 1.1 - camLead - clCamPull * 1.3, 0);          // tilt the gaze down a touch
   if(msgT > 0){ msgT -= dt; if(msgT <= 0) msgEl.textContent = ''; }
+  clPushPrev = keys['arrowleft'] || keys['a'] || keys['arrowright'] || keys['d'] || ptr !== null;   // for the cling "dead-end needs a FRESH press to let go" rule
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
