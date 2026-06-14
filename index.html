@@ -671,8 +671,9 @@ function clSnap(F1, F2, bc, br){                       // corner turn: glide the
   const n1 = faceDirG(bc, F1), n2 = faceDirG(bc, F2);
   let ax = n1[1] * n2[2] - n1[2] * n2[1], ay = n1[2] * n2[0] - n1[0] * n2[2], az = n1[0] * n2[1] - n1[1] * n2[0];
   const m = Math.hypot(ax, ay, az) || 1; clAxisX = ax / m; clAxisY = ay / m; clAxisZ = az / m;
-  const cx = P[mod(bc)][0] - 2.5, cz = P[mod(bc)][1] - 2.5;                     // pivot = the block's SHARED EDGE between F1 and F2 (so the cube rolls over the edge, not its own centre)
-  clPivX = cx + (n1[0] + n2[0]) * 0.5; clPivY = (br + 0.5) + (n1[1] + n2[1]) * 0.5; clPivZ = cz + (n1[2] + n2[2]) * 0.5;
+  const cx = P[mod(bc)][0] - 2.5, cz = P[mod(bc)][1] - 2.5;                     // clPiv = the corner pushed OUTBOARD; it's the control point of the Bézier swing so the cube goes AROUND the corner instead of through it (the render's Bézier still lands exactly on clFrom/target)
+  const pc = 1.5;                                                              // how far outboard the swing bulges (0.5 = on the edge); 1.5 clears the cube of the block corner
+  clPivX = cx + (n1[0] + n2[0]) * pc; clPivY = (br + 0.5) + (n1[1] + n2[1]) * pc; clPivZ = cz + (n1[2] + n2[2]) * pc;
 }
 
 // --- physics + render ---
@@ -847,9 +848,16 @@ function frame(now){
     }
   }
 
-  // #6: sand crumbles only WHILE you stand on it (faster now), blinks as it's about to go, and RESETS the instant you step off
+  // #6: sand crumbles WHILE you stand on it (~1s), blinks as it goes, RESETS if you step off, and REAPPEARS 3s after it crumbles
   {
-    const SAND_T = 0.85;
+    const SAND_T = 1.0, SAND_RESPAWN = 3.0;
+    if(sandTimers.size){                                          // bring crumbled blocks back after their respawn timer
+      for(const [k, t] of [...sandTimers]){
+        const nt = t - dt;
+        if(nt <= 0){ sandTimers.delete(k); sandSet.add(k); solidSet.add(k); const sm = sandMeshes.find(x => x.key === k); if(sm){ sm.m.visible = true; sm.m.scale.set(1, 1, 1); tower.add(sm.m); } }
+        else sandTimers.set(k, nt);
+      }
+    }
     const ss = (mode === 'ground') ? Kk(col(), Math.floor(heroY + 0.02) - 1) : null;
     const cur = (ss !== null && sandSet.has(ss)) ? ss : null;
     if(cur !== sandKey){                                          // moved on/off a sand block -> restore the one we left, start the new one from 0
@@ -860,8 +868,10 @@ function frame(now){
     if(sandKey){
       sandT += dt;
       const sm = sandMeshes.find(x => x.key === sandKey);
-      if(sandT >= SAND_T){                                        // gone
-        sandSet.delete(sandKey); solidSet.delete(sandKey); if(sm) tower.remove(sm.m); sandKey = null; sandT = 0;
+      if(sandT >= SAND_T){                                        // gone -> remove now, schedule its return
+        sandSet.delete(sandKey); solidSet.delete(sandKey); if(sm) tower.remove(sm.m);
+        sandTimers.set(sandKey, SAND_RESPAWN);
+        sandKey = null; sandT = 0;
       } else if(sm){
         const left = SAND_T - sandT;
         sm.m.visible = left > 0.4 || Math.floor(sandT * 24) % 2 === 0;   // fast blink in the final 0.4s
@@ -1200,14 +1210,12 @@ function frame(now){
     if(clAnim > 0){                                                                          // ease around the corner — the cube PIVOTS ABOUT THE SHARED EDGE (clPiv), not its own centre
       clAnim = Math.max(0, clAnim - dt);
       const e = 1 - clAnim / CLING_TURN, ee = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
-      const ax = new THREE.Vector3(clAxisX, clAxisY, clAxisZ);                               // roll axis = faceDir(F1) x faceDir(F2); +90° about it maps n1->n2 exactly
-      const armS = new THREE.Vector3(clFromX - clPivX, clFromY - clPivY, clFromZ - clPivZ);  // edge -> start centre (old face rest)
-      const armE = new THREE.Vector3(tx - clPivX, ty - clPivY, tz - clPivZ);                 // edge -> resting target (new face rest)
-      const qFull = new THREE.Quaternion().setFromAxisAngle(ax, Math.PI / 2);               // the honest 90° corner roll (same sign as the cube)
-      const resid = armE.clone().sub(armS.clone().applyQuaternion(qFull));                   // leftover after a clean 90° roll (unequal rest radii) — absorbed below
-      const arm = armS.clone().applyQuaternion(new THREE.Quaternion().setFromAxisAngle(ax, ee * Math.PI / 2)).add(resid.multiplyScalar(ee));
-      hero.position.set(clPivX + arm.x, clPivY + arm.y, clPivZ + arm.z);                     // pivots ON the shared edge; lands EXACTLY on the rest at ee=1 (no end-snap)
-      hero.quaternion.setFromAxisAngle(ax, ee * Math.PI / 2);                                // cube rolls the same clean 90° about the edge (reads upright at the end)
+      const u = 1 - ee;                                                                     // quadratic Bézier clFrom -> (clPiv = corner pushed OUTSIDE the block) -> target: the cube centre swings AROUND the corner, never through it, and still lands EXACTLY
+      hero.position.set(
+        clFromX * u * u + clPivX * 2 * u * ee + tx * ee * ee,
+        clFromY * u * u + clPivY * 2 * u * ee + ty * ee * ee,
+        clFromZ * u * u + clPivZ * 2 * u * ee + tz * ee * ee);
+      hero.quaternion.setFromAxisAngle(new THREE.Vector3(clAxisX, clAxisY, clAxisZ), ee * Math.PI / 2);   // cube rolls a clean 90° (symmetric -> reads upright at the end)
     } else if(clTang(clFace)){
       // #5: a HORIZONTAL crawl ROLLS the cube along the surface (continuous), like an inverted floor — no more one-frame snap between blocks
       const isTop = clFace === 'T';
