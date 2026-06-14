@@ -1014,6 +1014,9 @@ function frame(now){
               else clDetach('slip');
             }
           }
+        } else {                                                              // not climbing -> settle to the nearest block so you never rest mid-tumble (halfway up a block)
+          const tgt = Math.round(clT);
+          if(Math.abs(clT - tgt) > 0.002) clT += (tgt - clT) * Math.min(1, dt * 12);
         }
         if(mode === 'cling'){
           heroY = clT;
@@ -1235,8 +1238,15 @@ function frame(now){
       hero.position.y += isTop ? -squash * 0.4 : squash * 0.4;
       hero.quaternion.copy(q);
     } else {
-      hero.position.set(tx, ty, tz);
-      hero.quaternion.identity();
+      // L/R/O/I vertical face: ROLL the cube up/down the wall (consistent with the ground walk / crawl) instead of sliding flat
+      const up3 = new THREE.Vector3(0, 1, 0);
+      const fr = heroY - Math.floor(heroY);                                   // 0..1 climb fraction within the current block
+      const axis = new THREE.Vector3(n[0], 0, n[2]).cross(up3).normalize();   // horizontal roll axis (n × up) -> the cube tumbles up/down the wall
+      const q = new THREE.Quaternion().setFromAxisAngle(axis, fr * Math.PI / 2);
+      const pivot = new THREE.Vector3(bx + n[0] * 0.5, Math.floor(heroY) + 1, bz + n[2] * 0.5);   // the horizontal edge it rolls over (wall surface, block boundary)
+      const off = new THREE.Vector3(n[0] * 0.46, -0.5, n[2] * 0.46).applyQuaternion(q);
+      hero.position.copy(pivot.add(off));
+      hero.quaternion.copy(q);
     }
     hero.scale.set(0.92 + squash * 0.5, 0.92 - squash * 0.8, 0.92 + squash * 0.5);
   } else {
