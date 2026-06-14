@@ -59,7 +59,7 @@ function faceDirG(c, F){                                   // outward normal of 
   const o = cardinalOut(c); return F === 'O' ? o : [-o[0], 0, -o[2]];
 }
 const clHeroCol = (bc, F) => F === 'L' ? mod(bc - 1) : F === 'R' ? mod(bc + 1) : mod(bc);   // column the hero occupies while clung
-const clTang = F => F === 'B';                              // B slides around (tangential); L/R/O/I are climbed (vertical)
+const clTang = F => F === 'B' || F === 'O' || F === 'I';    // walk-along faces (ceiling/outer/inner, like an inverted floor); only L/R are climbed
 
 // --- scene scaffolding ---
 const canvas = document.getElementById('c');
@@ -529,6 +529,7 @@ const col = () => mod(K);
 const rows = () => { const a = Math.floor(heroY + 0.02), b = Math.floor(heroY + 0.95); return a === b ? [a] : [a, b]; };
 function canEnter(k2){
   const c = mod(k2);
+  if(mode === 'cling' && clCell && (clFace === 'O' || clFace === 'I')) return faced(c, clCell[1], clFace);   // outer/inner walk: slide only along the painted run (the block sits at the hero's own row, so the normal solid test would wrongly block it)
   if(!rows().every(r => !solid(c, r))) return false;
   if(mode === 'air' && vy < 0 && solid(c, Math.floor(heroY + 0.999))) return false;  // no sliding under ceilings mid-rise
   return true;
@@ -659,7 +660,7 @@ function frame(now){
   // soft speed cap: rot chases the target, velocity saturates instead of snapping.
   // SKIP entirely while riding a mount — the ride block owns rot and K; setRot() here would
   // nudge K and fight the carry, spinning the cube.
-  if(!carrier && !(mode === 'cling' && clFace && clFace !== 'B')){   // vertical cling consumes input as climb, not spin
+  if(!carrier && !(mode === 'cling' && clFace && !clTang(clFace))){   // only vertical (L/R) cling consumes input as climb, not spin; walk-along faces keep the chase
     const lagD = rotTarget - rot;
     if(Math.abs(lagD) > 1e-5){
       const vel = Math.sign(lagD) * Math.min(Math.abs(lagD) * CHASE_K, ROTMAX);
@@ -882,53 +883,55 @@ function frame(now){
     else if(climbA <= 0){                                                    // (while a face-change snap plays, it owns the hero)
       if(keys[' '] || keys['arrowup'] || keys['w']){ clDetach('jump'); }     // jump off the surface
       else if(clTang(clFace)){
-        // ===== ceiling crawl (B): slides tangentially; the existing chase owns K, exactly like the old hang =====
-        heroY = br - 1; clT = K;
-        if(spikes.has(Kk(col(), br - 1))){ die("the spikes."); }
+        // ===== walk along a surface (B ceiling / O outer / I inner): the chase slides K, like a floor — just inverted =====
+        const F = clFace, bodyR = (F === 'B') ? br - 1 : br;       // ceiling hangs below; outer/inner sit beside the block's own row
+        heroY = bodyR; clT = K;
+        if(spikes.has(Kk(col(), bodyR))){ die("the spikes."); }
         else {
           const hH = angOf(K) - midOf(K - 1), hH2 = midOf(K) - angOf(K);
           const daH = (-rot) - angOf(K);
           const gH = daH >= 0 ? Math.min(0.5, daH / (2 * hH2)) : Math.max(-0.5, daH / (2 * hH));
           if(Math.abs(gH) > 0.04) clFacing = Math.sign(gH);
-          if(faced(col(), br, 'B') && solid(col(), br)){ clCell = [col(), br]; }   // slid onto the next ceiling block
+          if(faced(col(), br, F) && solid(col(), br)){ clCell = [col(), br]; }   // walked onto the next block, same surface
           else {
-            // off the end of the painted ceiling — round a corner, else drop
+            // ran off the end — round the corner onto a connected face (with rotation), else drop
             const s = clFacing, prev = mod(col() - s), cur = col();
-            if(faced(prev, br, s > 0 ? 'R' : 'L')){                          // convex: fold onto this block's side, climb down
+            if(faced(prev, br, s > 0 ? 'R' : 'L')){                          // convex: fold onto the last block's side wall
               const F2 = s > 0 ? 'R' : 'L'; clCell = [prev, br]; clFace = F2; clT = heroY; clSign = s; clFacing = s;
               clSnap(prev, clHeroCol(prev, F2), br, heroY + 0.5); showMsg("around the corner.");
-            } else if(solid(cur, br) && faced(cur, br, s > 0 ? 'L' : 'R')){    // concave: ceiling meets a wall going up
+            } else if(solid(cur, br) && faced(cur, br, s > 0 ? 'L' : 'R')){    // concave: surface meets a wall going up
               const F2 = s > 0 ? 'L' : 'R'; clCell = [cur, br]; clFace = F2; clT = heroY; clSign = -s; clFacing = -s;
               let d = ((clHeroCol(cur, F2) - col()) % N + N) % N; if(d > N / 2) d -= N; K += d;
               clSnap(cur, clHeroCol(cur, F2), br, heroY + 0.5); showMsg("up the wall.");
-            } else if(faced(prev, br, 'O')){                                  // convex: fold onto the outer face, climb down
+            } else if(F === 'B' && faced(prev, br, 'O')){                      // ceiling -> outer face, around a convex tower corner
               clCell = [prev, br]; clFace = 'O'; clT = heroY; clSign = s; clFacing = s;
               clSnap(prev, clHeroCol(prev, 'O'), br, heroY + 0.5); showMsg("out onto the face.");
             } else { clDetach('slip'); }
           }
         }
       } else {
-        // ===== vertical climb (L/R/O/I): ONE push drives the climb; column is pinned (no spin) =====
+        // ===== climb a wall (L/R): the push drives the climb; at the top the surface wraps onto a ceiling, else vaults =====
         const steer = rotTarget - rot;
         let dir = 0;
         if(Math.abs(steer) > 1e-3) dir = (Math.sign(steer) === clSign) ? 1 : -1;
         rotTarget = rot;                                  // consume the push as climb, not rotation
         if(dir !== 0){ clT += dir * CLING_SPD * dt; clFacing = dir; }
         heroY = clT;
-        const feet = Math.floor(heroY + 0.02);
-        if(spikes.has(Kk(col(), feet))){ die("the spikes."); }
+        const hc = col(), feet = Math.floor(heroY + 0.02), headR = Math.floor(heroY + 0.92);
+        if(spikes.has(Kk(hc, feet))){ die("the spikes."); }
+        else if(headR > br && faced(hc, headR, 'B') && solid(hc, headR)){                    // head reaches a sticky ceiling -> wrap UNDER it (climb-up flows into a crawl, like turning a corner)
+          clCell = [hc, headR]; clFace = 'B'; heroY = clT = headR - 1; clSnap(bc, hc, headR, br + 0.5); showMsg("under the ledge.");
+        }
         else if(feet > br){
-          if(faced(bc, br + 1, clFace) && solid(bc, br + 1)){ clCell = [bc, br + 1]; }       // continue up the same face
-          else if(!solid(bc, br + 1) && !solid(col(), br + 1)){                              // vault over the lip onto the top
-            const oc = col();
-            let d = ((bc - col()) % N + N) % N; if(d > N / 2) d -= N; K += d;
+          if(faced(bc, br + 1, clFace) && solid(bc, br + 1)){ clCell = [bc, br + 1]; }       // continue up the same wall
+          else if(!solid(bc, br + 1) && !solid(hc, br + 1)){                                 // vault over the lip onto the top
+            let d = ((bc - hc) % N + N) % N; if(d > N / 2) d -= N; K += d;
             heroY = br + 1; clT = heroY; vy = 0; mode = 'ground';
-            clSnap(oc, bc, br + 1, br + 0.5); clCell = null; clFace = null;
-            showMsg("over the lip.");
+            clSnap(hc, bc, br + 1, br + 0.5); clCell = null; clFace = null; showMsg("over the lip.");
           } else { clT = Math.min(clT, br + 0.97); heroY = clT; }                            // capped: hold at the lip
         }
         else if(feet < br){
-          if(faced(bc, br - 1, clFace) && solid(bc, br - 1)){ clCell = [bc, br - 1]; }       // continue down the same face
+          if(faced(bc, br - 1, clFace) && solid(bc, br - 1)){ clCell = [bc, br - 1]; }       // continue down the same wall
           else { clDetach('slip'); }                                                          // off the bottom -> air
         }
       }
@@ -999,13 +1002,16 @@ function frame(now){
       }
     }
     heroY = ny;
-    // roll / fall into a sticky side wall -> cling on contact (no settle ritual), if you're pushing toward it
+    // roll / fall into a sticky side wall -> cling on contact, if you're pushing toward it.
+    // forgiving vertical window: grab at ANY row the hero's body overlaps (was a single row -> felt like a tiny sweet spot)
     if(mode === 'air' && clGuard <= 0){
-      const rc = Math.floor(heroY + 0.3);
       for(const s of [1, -1]){
+        if(!(s > 0 ? (keys['arrowright'] || keys['d']) : (keys['arrowleft'] || keys['a']))) continue;
         const nc = mod(col() + s), F = s > 0 ? 'L' : 'R';
-        const want = s > 0 ? (keys['arrowright'] || keys['d']) : (keys['arrowleft'] || keys['a']);
-        if(want && solid(nc, rc) && faced(nc, rc, F) && !solid(col(), rc)){ clAttach(nc, rc, F, -s); break; }   // -s: keep pushing into the wall => climb UP
+        for(const rc of [Math.floor(heroY + 0.02), Math.floor(heroY + 0.5), Math.floor(heroY + 0.95)]){
+          if(solid(nc, rc) && faced(nc, rc, F) && !solid(col(), rc)){ clAttach(nc, rc, F, -s); break; }   // -s: keep pushing into the wall => climb UP
+        }
+        if(mode === 'cling') break;
       }
     }
   }
