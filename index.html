@@ -155,8 +155,11 @@ hero.scale.set(0.92, 0.92, 0.92);
 hero.add(edgeLine(0xffe8b0));
 tower.add(hero);
 // #3: a subtle dashed guide showing where the hero will fall/land (a child of the tower so it rotates with the column)
-const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x6fc7ff, transparent: true, opacity: 0.45, dashSize: 0.28, gapSize: 0.22 }));
+const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x6fc7ff, transparent: true, opacity: 0.22, dashSize: 0.28, gapSize: 0.22 }));   // #2: 50% more transparent
 trajLine.frustumCulled = false; trajLine.visible = false; tower.add(trajLine);
+// #1: glow ONLY the top face of the block under the hero (a plate, not the whole cube)
+const glowPlate = new THREE.Mesh(plate, new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.5 }));
+glowPlate.visible = false; tower.add(glowPlate);
 function updateTrajectory(){
   if(mode !== 'air'){ if(trajLine.visible) trajLine.visible = false; return; }
   const c = col(), x = P[c][0] - 2.5, z = P[c][1] - 2.5;
@@ -183,7 +186,7 @@ function solid(c, r){
 }
 function faced(c, r, F){ return faceSet.has(Kk(c, r) + ',' + F); }   // single-sided sticky test (the painted face exists here)
 function clearGroup(){
-  for(let i = tower.children.length - 1; i >= 0; i--){ const ch = tower.children[i]; if(ch !== hero && ch !== trajLine) tower.remove(ch); }
+  for(let i = tower.children.length - 1; i >= 0; i--){ const ch = tower.children[i]; if(ch !== hero && ch !== trajLine && ch !== glowPlate) tower.remove(ch); }
 }
 // ---- custom level from the editor's "play" button (passed in the URL hash: game.html#play=<json>) ----
 let CUSTOM = null;
@@ -482,8 +485,9 @@ const CLING_TURN = 0.30;          // cling corner turns ease a touch slower than
 // sticky cling: ONE mode that replaces wall+hang. clCell=the painted block [c,r], clFace=B/L/R/O/I,
 // clT=climb height, clSign=which push direction climbs UP (kept continuous across corners), clFacing=last move dir,
 // clGuard=brief no-regrab timer after letting go, clCamPull=eased camera dolly-back while on an outer (O) face.
-let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clPushPrev = false;
-let camCornerPull = 0, glowKey = null;
+let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clReleaseT = 1, clDropTarget = 0;
+let camCornerPull = 0;
+let sandKey = null, sandT = 0;   // the sand block currently being stood on + how long (resets when you step off)
 let padCombo = 0, padArmKey = null, padArmT = 0;   // jump-pad: consecutive-bounce counter (2,3,4,5 sq) + a settle timer so a fresh bounce waits until the bottom is flat
 const CLING_SPD = 2.6;
 let currentRoom = 0, bankCoins = 0, wonRun = false, r1CoinsLeft = 4, crackCreaked = false, spawnGuard = 0;
@@ -530,7 +534,7 @@ function placeAt(cTarget, standY){
 }
 function resetCommon(){
   airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
-  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; glowKey = null; padCombo = 0; padArmKey = null;   // never respawn mid-cling
+  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
 }
 function resetRun(msg){
@@ -636,13 +640,15 @@ function clAttach(bc, br, F, sign){
 function clDetach(why){
   const wasCeiling = clTang(clFace);
   mode = 'air';
-  vy = (why === 'jump') ? (wasCeiling ? 1.2 : -6) : (wasCeiling ? 0.6 : 0.4);
   if(wasCeiling && clFacing){                          // ceiling/top crawl keeps its tangential launch (the "launched" feel)
+    vy = (why === 'jump') ? 1.2 : 0.6;
     const spanH = midOf(K) - midOf(K - 1);
     const cps = Math.abs(rotVel) / Math.max(1e-4, spanH);
     if(cps > 2.5) airCarry = Math.min(9, cps) * clFacing;
-  } else {                                             // wall / outer dismount: drop STRAIGHT off the face — kill momentum AND ignore the held push for a beat so it doesn't sling sideways
-    omega = 0; rotTarget = rot; airCarry = 0; clDropT = 0.25;
+  } else {                                             // #3: wall/outer dismount = a ~1-block push AWAY from the face + a small hop (not a straight drop)
+    vy = -3; omega = 0; airCarry = 0;
+    if(clFace === 'L' || clFace === 'R'){ clDropTarget = -angOf(K + (clFace === 'R' ? 1 : -1)); clDropT = 0.22; }   // glide one column away from the block
+    else { clDropTarget = rot; clDropT = 0.16; }       // O/I: just the hop (a radial push isn't representable in the air)
   }
   clCell = null; clFace = null; clGuard = 0.22; clAnim = 0;   // brief no-regrab
 }
@@ -684,7 +690,10 @@ function frame(now){
     if(Math.abs(airCarry) < 0.6) airCarry = 0;
   }
   if(climbA > 0){ rotTarget = rot; omega = 0; }   // the vault owns this beat
-  if(clDropT > 0){ clDropT -= dt; rotTarget = rot; omega = 0; }   // just dropped off a wall -> fall straight for a beat, ignoring the still-held push
+  if(clDropT > 0){ clDropT -= dt; rotTarget = clDropTarget; omega = 0; }   // dismount push-away: glide to the away column, ignore the still-held push for a beat
+  const cInput = keys['arrowleft'] || keys['a'] || keys['arrowright'] || keys['d'] || ptr !== null;
+  const clFresh = cInput && clReleaseT > 0.08;   // #4: a press that began after >0.08s of no input (robust against brief input gaps) -> only this lets go at a dead end
+  if(cInput) clReleaseT = 0; else clReleaseT += dt;
   // soft speed cap: rot chases the target, velocity saturates instead of snapping.
   // SKIP entirely while riding a mount — the ride block owns rot and K; setRot() here would
   // nudge K and fight the carry, spinning the cube.
@@ -814,17 +823,25 @@ function frame(now){
     }
   }
 
-  // sand crumbles once stood on
-  if(sandTimers.size){
-    for(const [key, t0] of [...sandTimers]){
-      const t = t0 - dt;
-      const sm = sandMeshes.find(x => x.key === key);
-      if(t <= 0){
-        sandTimers.delete(key); sandSet.delete(key); solidSet.delete(key);
-        if(sm){ tower.remove(sm.m); }
-      } else {
-        sandTimers.set(key, t);
-        if(sm && t < 0.22){ const s2 = Math.max(0.05, t / 0.22); sm.m.scale.set(s2, s2, s2); }
+  // #6: sand crumbles only WHILE you stand on it (faster now), blinks as it's about to go, and RESETS the instant you step off
+  {
+    const SAND_T = 0.85;
+    const ss = (mode === 'ground') ? Kk(col(), Math.floor(heroY + 0.02) - 1) : null;
+    const cur = (ss !== null && sandSet.has(ss)) ? ss : null;
+    if(cur !== sandKey){                                          // moved on/off a sand block -> restore the one we left, start the new one from 0
+      if(sandKey){ const om = sandMeshes.find(x => x.key === sandKey); if(om){ om.m.visible = true; om.m.scale.set(1, 1, 1); } }
+      sandKey = cur; sandT = 0;
+      if(cur) showMsg("the sand gives.");
+    }
+    if(sandKey){
+      sandT += dt;
+      const sm = sandMeshes.find(x => x.key === sandKey);
+      if(sandT >= SAND_T){                                        // gone
+        sandSet.delete(sandKey); solidSet.delete(sandKey); if(sm) tower.remove(sm.m); sandKey = null; sandT = 0;
+      } else if(sm){
+        const left = SAND_T - sandT;
+        sm.m.visible = left > 0.4 || Math.floor(sandT * 24) % 2 === 0;   // fast blink in the final 0.4s
+        const s2 = left < 0.18 ? Math.max(0.12, left / 0.18) : 1; sm.m.scale.set(s2, s2, s2);
       }
     }
   }
@@ -853,8 +870,7 @@ function frame(now){
       const Mu = mountUnder(sup);
       if(carrier !== Mu){ carrier = Mu; rideSteer = 0; Mu.c = col(); Mu.lastCell = col(); }   // fresh bind
     }
-    else if(!solid(col(), sup)){ mode = 'air'; vy = 0; carrier = null; }
-    else if(sandSet.has(supKey) && !sandTimers.has(supKey)){ sandTimers.set(supKey, 2.0); showMsg("the sand gives."); }
+    else if(!solid(col(), sup)){ mode = 'air'; vy = 0; carrier = null; }   // (sand crumble/blink/reset handled above)
     // the chest: push against it with the key
     if(mode === 'ground'){
       if(lockMsgCd > 0) lockMsgCd -= dt;
@@ -932,7 +948,7 @@ function frame(now){
                 const F1 = isTop ? 'T' : 'B'; clFace = F2; heroY = clT = isTop ? br + 1 : br;   // arrive at the side's TOP (from a top) or BOTTOM (from a ceiling)
                 const hcN = clHeroCol(bc, F2); let dd = ((hcN - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd;
                 clFacing = s; clSnap(F1, F2, bc, br); showMsg("around the corner.");
-              } else { if(!clPushPrev) clDetach('slip'); }                    // nothing connected: fresh press lets go, held crawl holds at the edge
+              } else { if(clFresh) clDetach('slip'); }                        // nothing connected: fresh press lets go, held crawl holds at the edge
             }
           }
         }
@@ -948,7 +964,7 @@ function frame(now){
           // is there a sticky surface to go to that way? (the wall continues, or a top/underside to wrap onto)
           const destUp = (faced(bc, br + 1, clFace) && solid(bc, br + 1)) || faced(bc, br, 'T');
           const destDn = (faced(bc, br - 1, clFace) && solid(bc, br - 1)) || faced(bc, br, 'B');
-          if((dir > 0 && !destUp) || (dir < 0 && !destDn)){ if(!clPushPrev) clDetach('slip'); }   // nothing that way: a FRESH press lets go; a HELD push just holds (you must release & press again)
+          if((dir > 0 && !destUp) || (dir < 0 && !destDn)){ if(clFresh) clDetach('slip'); }   // nothing that way: a FRESH press lets go; a HELD push just holds (you must release & press again)
           else { clT += dir * CLING_SPD * dt; clFacing = dir; }
         }
         if(mode === 'cling'){
@@ -1149,6 +1165,24 @@ function frame(now){
       const e = 1 - clAnim / CLING_TURN, ee = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
       hero.position.set(clFromX + (tx - clFromX) * ee, clFromY + (ty - clFromY) * ee, clFromZ + (tz - clFromZ) * ee);
       hero.quaternion.setFromAxisAngle(new THREE.Vector3(clAxisX, clAxisY, clAxisZ), ee * Math.PI / 2);   // roll the cube over the corner edge
+    } else if(clTang(clFace)){
+      // #5: a HORIZONTAL crawl ROLLS the cube along the surface (continuous), like an inverted floor — no more one-frame snap between blocks
+      const isTop = clFace === 'T';
+      const hL2 = angOf(K) - midOf(K - 1), hR2 = midOf(K) - angOf(K);
+      const da2 = (-(rot + rotLag)) - angOf(K);
+      const g2 = da2 >= 0 ? Math.min(0.5, da2 / (2 * hR2)) : Math.max(-0.5, da2 / (2 * hL2));
+      const sgn = g2 >= 0 ? 1 : -1;
+      const c0 = P[col()], c1 = P[mod(K + sgn)];
+      const d3 = new THREE.Vector3(c1[0] - c0[0], 0, c1[1] - c0[1]);
+      const up3 = new THREE.Vector3(0, 1, 0);
+      const axis = isTop ? up3.clone().cross(d3).normalize() : d3.clone().cross(up3).normalize();
+      const q = new THREE.Quaternion().setFromAxisAngle(axis, Math.abs(g2) * Math.PI / 2);
+      const pvY = isTop ? br + 1 : br;                       // the top face (br+1) or the ceiling underside (br) the cube rolls over
+      const pivot = new THREE.Vector3(c0[0] - 2.5, pvY, c0[1] - 2.5).add(d3.clone().multiplyScalar(0.5));
+      const off = d3.clone().multiplyScalar(-0.5).add(up3.clone().multiplyScalar(isTop ? 0.5 : -0.5)).applyQuaternion(q);
+      hero.position.copy(pivot.add(off));
+      hero.position.y += isTop ? -squash * 0.4 : squash * 0.4;
+      hero.quaternion.copy(q);
     } else {
       hero.position.set(tx, ty, tz);
       hero.quaternion.identity();
@@ -1179,16 +1213,13 @@ function frame(now){
   }
   hero.visible = mode !== 'dead';
 
-  // #7: subtle glow on the block the hero stands on / hovers over — but not while clinging to a sticky surface
-  let glowTarget = null;
+  // #1/#7: subtle glow on the TOP FACE of the block under the hero (a plate, not the whole cube) — not while clinging
+  let glowC = -1, glowR = -1;
   if(mode === 'ground' || mode === 'air'){
-    for(let r = Math.floor(heroY + 0.02) - 1; r >= 0 && r > heroY - 6; r--){ if(solid(col(), r)){ glowTarget = Kk(col(), r); break; } }
+    for(let r = Math.floor(heroY + 0.02) - 1; r >= 0 && r > heroY - 6; r--){ if(solid(col(), r)){ glowC = col(); glowR = r; break; } }
   }
-  if(glowTarget !== glowKey){
-    if(glowKey){ const og = cubeList.find(x => x.key === glowKey); if(og) og.m.material.emissive.setRGB(0, 0, 0); }
-    if(glowTarget){ const ng = cubeList.find(x => x.key === glowTarget); if(ng) ng.m.material.emissive.setRGB(0.14, 0.13, 0.08); }
-    glowKey = glowTarget;
-  }
+  if(glowR >= 0){ glowPlate.visible = true; glowPlate.position.set(P[glowC][0] - 2.5, glowR + 1 + 0.045, P[glowC][1] - 2.5); }
+  else glowPlate.visible = false;
   updateTrajectory();   // #3: draw/refresh the fall guide
 
   const leadT = (mode === 'air' && vy > 2) ? Math.min(3.5, vy * 0.3) : 0;
@@ -1203,7 +1234,6 @@ function frame(now){
   camera.position.set(0, camY + (camFocusY + 4.2 + clCamPull * 2.2 - camLead - camY) * Math.min(1, dt * 4), camZ);
   camera.lookAt(0, camFocusY + 1.1 - camLead - clCamPull * 1.3, 0);          // tilt the gaze down a touch
   if(msgT > 0){ msgT -= dt; if(msgT <= 0) msgEl.textContent = ''; }
-  clPushPrev = keys['arrowleft'] || keys['a'] || keys['arrowright'] || keys['d'] || ptr !== null;   // for the cling "dead-end needs a FRESH press to let go" rule
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
