@@ -466,6 +466,7 @@ const CLING_TURN = 0.30;          // cling corner turns ease a touch slower than
 // clGuard=brief no-regrab timer after letting go, clCamPull=eased camera dolly-back while on an outer (O) face.
 let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clPushPrev = false;
 let camCornerPull = 0, glowKey = null;
+let padCombo = 0, padArmKey = null, padArmT = 0;   // jump-pad: consecutive-bounce counter (2,3,4,5 sq) + a settle timer so a fresh bounce waits until the bottom is flat
 const CLING_SPD = 2.6;
 let currentRoom = 0, bankCoins = 0, wonRun = false, r1CoinsLeft = 4, crackCreaked = false, spawnGuard = 0;
 const CRACK_V = 11;
@@ -511,7 +512,7 @@ function placeAt(cTarget, standY){
 }
 function resetCommon(){
   airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
-  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; glowKey = null;   // never respawn mid-cling
+  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; glowKey = null; padCombo = 0; padArmKey = null;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
 }
 function resetRun(msg){
@@ -814,7 +815,13 @@ function frame(now){
     const sup = Math.floor(heroY + 0.02) - 1;
     if(carrier && solid(col(), sup)){ carrier = null; rideFrac = null; rideSteer = 0; }   // stepped onto solid floor: stop riding
     const supKey = Kk(col(), sup);
-    if(pads.has(supKey)){ vy = -14; mode = 'air'; squash = 0; showMsg("sproing."); }
+    if(!pads.has(supKey)){ padCombo = 0; padArmKey = null; }      // standing on anything that isn't a pad resets the bounce combo
+    if(pads.has(supKey)){                                         // #2/#6: launch only once the bottom has settled flat; chained bounces go higher (2,3,4,5 squares)
+      const h = [2, 3, 4, 5][Math.min(padCombo, 3)], launch = -Math.sqrt(2 * 26 * h);
+      if(padCombo > 0){ vy = launch; mode = 'air'; squash = 0; padCombo++; showMsg("sproing."); }                          // already chaining -> fire now
+      else { if(padArmKey !== supKey){ padArmKey = supKey; padArmT = 0.09; } padArmT -= dt;
+        if(padArmT <= 0){ vy = launch; mode = 'air'; squash = 0; padCombo = 1; padArmKey = null; showMsg("sproing."); } }  // fresh -> wait a beat (flat), then launch
+    }
     else if(spikes.has(Kk(col(), sup + 1))){ die("the spikes."); }
     else if(doorSet.has(supKey)){
       if(keyCount > 0){
@@ -1003,9 +1010,15 @@ function frame(now){
           vy *= 0.6; squash = 0.1;
           showMsg("it gives way.");
         } else if(solid(col(), r0)){
-          ny = r0 + 1; vy = 0; mode = 'ground'; squash = 0.18; airCarry = 0;
-          if(crackedSet.has(ck)){ showMsg("it creaks. heavier."); }
-          if(pads.has(Kk(col(), r0))){ vy = -14; mode = 'air'; squash = 0; showMsg("sproing."); }
+          ny = r0 + 1; airCarry = 0;
+          const onPad = pads.has(Kk(col(), r0));
+          if(onPad && padCombo > 0){                              // #2: pad-to-pad chain -> bounce straight off (no settle), higher
+            const h = [2, 3, 4, 5][Math.min(padCombo, 3)]; vy = -Math.sqrt(2 * 26 * h); mode = 'air'; squash = 0; padCombo++; showMsg("sproing.");
+          } else {
+            vy = 0; mode = 'ground'; squash = 0.18;              // fresh landing -> settle; the ground branch waits a beat then launches (#6)
+            if(!onPad) padCombo = 0;                             // landed on a non-pad -> reset the combo
+            if(crackedSet.has(ck)){ showMsg("it creaks. heavier."); }
+          }
         }
       }
     }
