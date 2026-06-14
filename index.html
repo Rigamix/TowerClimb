@@ -463,7 +463,7 @@ const CLIMB_DUR = 0.18;
 // sticky cling: ONE mode that replaces wall+hang. clCell=the painted block [c,r], clFace=B/L/R/O/I,
 // clT=climb height, clSign=which push direction climbs UP (kept continuous across corners), clFacing=last move dir,
 // clGuard=brief no-regrab timer after letting go, clCamPull=eased camera dolly-back while on an outer (O) face.
-let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0;
+let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0;
 const CLING_SPD = 2.6;
 let currentRoom = 0, bankCoins = 0, wonRun = false, r1CoinsLeft = 4, crackCreaked = false, spawnGuard = 0;
 const CRACK_V = 11;
@@ -609,7 +609,7 @@ function clAttach(bc, br, F, sign){
   vy = 0; tip = 0; climbHold = 0; airCarry = 0; omega = 0;
   let d = ((clHeroCol(bc, F) - col()) % N + N) % N; if(d > N / 2) d -= N; K += d;   // center the hero's column
   if(F === 'B') heroY = br - 1;                       // ceiling: hang just under the block
-  clT = heroY; rot = -angOf(K); rotTarget = rot;
+  clT = heroY; clAnim = 0; rot = -angOf(K); rotTarget = rot;
   squash = Math.max(squash, 0.12);
 }
 function clDetach(why){
@@ -621,16 +621,12 @@ function clDetach(why){
   }
   mode = 'air';
   vy = (why === 'jump') ? (wasCeiling ? 1.2 : -6) : (wasCeiling ? 0.6 : 0.4);   // ceiling jump = drop off; wall jump = hop up & off
-  clCell = null; clFace = null; clGuard = 0.22;        // brief no-regrab so a jump actually leaves
+  clCell = null; clFace = null; clGuard = 0.22; clAnim = 0;   // brief no-regrab so a jump actually leaves
 }
-function clSnap(oc, tc, pivY, fromY){                  // 90° face change eased exactly like the block-vault
-  oc = mod(oc); tc = mod(tc);
+function clSnap(oc, tc, pivY, fromY){                  // smooth corner turn: recenter the tower (rotLag glides) + ease the hero's POSITION around the edge. NO spin (a cube looks the same on every face).
   rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
-  climbA = CLIMB_DUR;
-  climbPivot = [(P[oc][0] + P[tc][0]) / 2 - 2.5, pivY, (P[oc][1] + P[tc][1]) / 2 - 2.5];
-  climbFrom = [P[oc][0] - 2.5, fromY, P[oc][1] - 2.5];
-  const ax = new THREE.Vector3(P[tc][0] - P[oc][0], 0, P[tc][1] - P[oc][1]);
-  climbAxis = ax.length() < 1e-6 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0).cross(ax).normalize();
+  clAnim = CLIMB_DUR;
+  clFromX = hero.position.x; clFromY = hero.position.y; clFromZ = hero.position.z;   // glide from where the hero is now to the new face's spot
 }
 
 // --- physics + render ---
@@ -885,7 +881,7 @@ function frame(now){
   if(mode === 'cling'){
     let [bc, br] = clCell;
     if(!solid(bc, br) || !faced(bc, br, clFace)){ clDetach('peel'); }       // the block or its painted face is gone
-    else if(climbA <= 0){                                                    // (while a face-change snap plays, it owns the hero)
+    else if(climbA <= 0 && clAnim <= 0){                                     // (while a corner-turn ease plays, it owns the hero)
       if(clTang(clFace)){
         // ----- HORIZONTAL face (B ceiling / T top): crawl tangentially (the chase owns K); at the run's edge, wrap onto the side -----
         const isTop = clFace === 'T', bodyR = isTop ? br + 1 : br - 1;
@@ -1102,10 +1098,15 @@ function frame(now){
     const bc = cc[0], br = cc[1];
     const n = faceDirG(bc, clFace);
     const bx = P[bc][0] - 2.5, bz = P[bc][1] - 2.5;
-    if(clFace === 'B'){
-      hero.position.set(bx, (br + 0.5) - 1.0 + squash * 0.4, bz);                       // hang under the block
+    let tx, ty, tz;
+    if(clFace === 'B'){ tx = bx; ty = (br + 0.5) - 1.0 + squash * 0.4; tz = bz; }            // hang under the block
+    else { tx = bx + n[0] * 0.96; ty = heroY + 0.5 - squash * 0.4; tz = bz + n[2] * 0.96; }  // rest against a vertical / top face
+    if(clAnim > 0){                                                                          // ease around the corner — POSITION only, the cube never spins
+      clAnim = Math.max(0, clAnim - dt);
+      const e = 1 - clAnim / CLIMB_DUR, ee = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
+      hero.position.set(clFromX + (tx - clFromX) * ee, clFromY + (ty - clFromY) * ee, clFromZ + (tz - clFromZ) * ee);
     } else {
-      hero.position.set(bx + n[0] * 0.96, heroY + 0.5 - squash * 0.4, bz + n[2] * 0.96);  // rest against the vertical face
+      hero.position.set(tx, ty, tz);
     }
     hero.quaternion.identity();
     hero.scale.set(0.92 + squash * 0.5, 0.92 - squash * 0.8, 0.92 + squash * 0.5);
