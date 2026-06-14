@@ -485,7 +485,7 @@ const CLING_TURN = 0.30;          // cling corner turns ease a touch slower than
 // sticky cling: ONE mode that replaces wall+hang. clCell=the painted block [c,r], clFace=B/L/R/O/I,
 // clT=climb height, clSign=which push direction climbs UP (kept continuous across corners), clFacing=last move dir,
 // clGuard=brief no-regrab timer after letting go, clCamPull=eased camera dolly-back while on an outer (O) face.
-let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clReleaseT = 1, clDropTarget = 0;
+let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clReleaseT = 1, clDropTarget = 0, clPivX = 0, clPivY = 0, clPivZ = 0;
 let camCornerPull = 0;
 let sandKey = null, sandT = 0;   // the sand block currently being stood on + how long (resets when you step off)
 let padCombo = 0, padArmKey = null, padArmT = 0;   // jump-pad: consecutive-bounce counter (2,3,4,5 sq) + a settle timer so a fresh bounce waits until the bottom is flat
@@ -659,6 +659,8 @@ function clSnap(F1, F2, bc, br){                       // corner turn: glide the
   const n1 = faceDirG(bc, F1), n2 = faceDirG(bc, F2);
   let ax = n1[1] * n2[2] - n1[2] * n2[1], ay = n1[2] * n2[0] - n1[0] * n2[2], az = n1[0] * n2[1] - n1[1] * n2[0];
   const m = Math.hypot(ax, ay, az) || 1; clAxisX = ax / m; clAxisY = ay / m; clAxisZ = az / m;
+  const cx = P[mod(bc)][0] - 2.5, cz = P[mod(bc)][1] - 2.5;                     // pivot = the block's SHARED EDGE between F1 and F2 (so the cube rolls over the edge, not its own centre)
+  clPivX = cx + (n1[0] + n2[0]) * 0.5; clPivY = (br + 0.5) + (n1[1] + n2[1]) * 0.5; clPivZ = cz + (n1[2] + n2[2]) * 0.5;
 }
 
 // --- physics + render ---
@@ -1160,11 +1162,17 @@ function frame(now){
     let tx, ty, tz;
     if(clFace === 'B'){ tx = bx; ty = (br + 0.5) - 1.0 + squash * 0.4; tz = bz; }            // hang under the block
     else { tx = bx + n[0] * 0.96; ty = heroY + 0.5 - squash * 0.4; tz = bz + n[2] * 0.96; }  // rest against a vertical / top face
-    if(clAnim > 0){                                                                          // ease around the corner — POSITION only, the cube never spins
+    if(clAnim > 0){                                                                          // ease around the corner — the cube PIVOTS ABOUT THE SHARED EDGE (clPiv), not its own centre
       clAnim = Math.max(0, clAnim - dt);
       const e = 1 - clAnim / CLING_TURN, ee = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
-      hero.position.set(clFromX + (tx - clFromX) * ee, clFromY + (ty - clFromY) * ee, clFromZ + (tz - clFromZ) * ee);
-      hero.quaternion.setFromAxisAngle(new THREE.Vector3(clAxisX, clAxisY, clAxisZ), ee * Math.PI / 2);   // roll the cube over the corner edge
+      const ax = new THREE.Vector3(clAxisX, clAxisY, clAxisZ);                               // roll axis = faceDir(F1) x faceDir(F2); +90° about it maps n1->n2 exactly
+      const armS = new THREE.Vector3(clFromX - clPivX, clFromY - clPivY, clFromZ - clPivZ);  // edge -> start centre (old face rest)
+      const armE = new THREE.Vector3(tx - clPivX, ty - clPivY, tz - clPivZ);                 // edge -> resting target (new face rest)
+      const qFull = new THREE.Quaternion().setFromAxisAngle(ax, Math.PI / 2);               // the honest 90° corner roll (same sign as the cube)
+      const resid = armE.clone().sub(armS.clone().applyQuaternion(qFull));                   // leftover after a clean 90° roll (unequal rest radii) — absorbed below
+      const arm = armS.clone().applyQuaternion(new THREE.Quaternion().setFromAxisAngle(ax, ee * Math.PI / 2)).add(resid.multiplyScalar(ee));
+      hero.position.set(clPivX + arm.x, clPivY + arm.y, clPivZ + arm.z);                     // pivots ON the shared edge; lands EXACTLY on the rest at ee=1 (no end-snap)
+      hero.quaternion.setFromAxisAngle(ax, ee * Math.PI / 2);                                // cube rolls the same clean 90° about the edge (reads upright at the end)
     } else if(clTang(clFace)){
       // #5: a HORIZONTAL crawl ROLLS the cube along the surface (continuous), like an inverted floor — no more one-frame snap between blocks
       const isTop = clFace === 'T';
