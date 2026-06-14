@@ -886,8 +886,7 @@ function frame(now){
     let [bc, br] = clCell;
     if(!solid(bc, br) || !faced(bc, br, clFace)){ clDetach('peel'); }       // the block or its painted face is gone
     else if(climbA <= 0){                                                    // (while a face-change snap plays, it owns the hero)
-      if(keys[' ']){ clDetach('jump'); }                                     // SPACE drops off
-      else if(clTang(clFace)){
+      if(clTang(clFace)){
         // ----- HORIZONTAL face (B ceiling / T top): crawl tangentially (the chase owns K); at the run's edge, wrap onto the side -----
         const isTop = clFace === 'T', bodyR = isTop ? br + 1 : br - 1;
         heroY = bodyR; clT = K;
@@ -910,10 +909,10 @@ function frame(now){
         }
       } else {
         // ----- VERTICAL face (L/R/O/I): LEFT walks one way around the block, RIGHT the other; wrap to the next sticky face or dismount -----
-        const goL = keys['arrowleft'] || keys['a'], goR = keys['arrowright'] || keys['d'];
-        const upLeft = (clFace === 'L' || clFace === 'O');                    // on these, LEFT climbs UP (a consistent walk around the block)
+        const steer = rotTarget - rot;                                       // fed by keys (left/a => +) AND touch-drag AND flick momentum
+        const upLeft = (clFace === 'L' || clFace === 'O');                    // on these, the CCW direction climbs UP (a consistent walk around the block)
         let dir = 0;
-        if(goL) dir = upLeft ? 1 : -1; else if(goR) dir = upLeft ? -1 : 1;
+        if(steer > 0.004) dir = upLeft ? 1 : -1; else if(steer < -0.004) dir = upLeft ? -1 : 1;
         rotTarget = rot;                                                      // a wall never spins the tower
         if(dir !== 0){ clT += dir * CLING_SPD * dt; clFacing = dir; }
         heroY = clT;
@@ -1006,8 +1005,9 @@ function frame(now){
     // roll / fall into a sticky side wall -> cling on contact, if you're pushing toward it.
     // forgiving vertical window: grab at ANY row the hero's body overlaps (was a single row -> felt like a tiny sweet spot)
     if(mode === 'air' && clGuard <= 0){
+      const steer = rotTarget - rot;                                         // toward c+1 => steer<0; toward c-1 => steer>0 (keys OR drag)
       for(const s of [1, -1]){
-        if(!(s > 0 ? (keys['arrowright'] || keys['d']) : (keys['arrowleft'] || keys['a']))) continue;
+        if(!(s > 0 ? (steer < -0.01) : (steer > 0.01))) continue;
         const nc = mod(col() + s), F = s > 0 ? 'L' : 'R';
         for(const rc of [Math.floor(heroY + 0.02), Math.floor(heroY + 0.5), Math.floor(heroY + 0.95)]){
           if(solid(nc, rc) && faced(nc, rc, F) && !solid(col(), rc)){ clAttach(nc, rc, F, -s); break; }   // -s: keep pushing into the wall => climb UP
