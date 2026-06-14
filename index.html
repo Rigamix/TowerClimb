@@ -208,7 +208,7 @@ function loadCustom(){
   if(!body.length) return null;
   return { body, rows: body.length, BASE: 2, dividers: (data.dividers || []).filter(d => d > 0).sort((a, b) => a - b), stickLines };
 }
-function mkMon(c, wr, type){ return { row: wr, c, dir: 1, speed: 1.6, state: 'alive', thawT: 0, grp: null, bodyMat: null, type, phase: 'happy', rideT: 0, lastCell: c, faces: null }; }
+function mkMon(c, wr, type, vert){ return { row: wr, c, dir: 1, speed: 1.6, state: 'alive', thawT: 0, grp: null, bodyMat: null, type, vert: !!vert, phase: 'happy', rideT: 0, lastCell: c, faces: null }; }
 function populateCustom(){
   BANDS = [];   // editor levels have no moving platforms
   const { body, rows, BASE, dividers } = CUSTOM;
@@ -238,6 +238,9 @@ function populateCustom(){
         case 'x': MONSTERS.push(mkMon(c, wr, 'spiky')); break;
         case 'm': MONSTERS.push(mkMon(c, wr, 'normal')); break;
         case '@': MONSTERS.push(mkMon(c, wr, 'mount')); break;
+        case 'X': MONSTERS.push(mkMon(c, wr, 'spiky', true)); break;    // vertical-patrol variants (same archetypes, move up/down)
+        case 'W': MONSTERS.push(mkMon(c, wr, 'normal', true)); break;
+        case 'Y': MONSTERS.push(mkMon(c, wr, 'mount', true)); break;
       }
     }
   }
@@ -593,7 +596,7 @@ window.addEventListener('pointermove', e => {
   const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(8, now - lastT);
   if(Math.abs(dx) > 1.5) lastDrag = now;
   if(carrier){ rideSteer += dx * SENS * 1.5; }
-  else rotTarget += dx * SENS * (mode === 'cling' ? (clFace === 'T' ? 1 : -1) : 1);   // cling controls are SCREEN-RELATIVE: drag/press toward the block to climb up-and-over it (T re-flips so the top keeps the same sense)
+  else rotTarget += dx * SENS * (mode === 'cling' && !clTang(clFace) ? -1 : 1);   // ceiling/top CRAWL matches the floor (drag left -> hero goes right); only the vertical WALL climb is flipped so RIGHT climbs a wall on your right
   if(rotTarget - rot > 1.2) rotTarget = rot + 1.2;
   else if(rotTarget - rot < -1.2) rotTarget = rot - 1.2;
   dragVel = (dx * SENS) / (dt / 1000);
@@ -685,9 +688,9 @@ function frame(now){
     // on a mount: arrow/A/D nudges the dismount accumulator instead of rolling the world
     if(keys['arrowleft'] || keys['a']) rideSteer += 5.5 * dt;
     else if(keys['arrowright'] || keys['d']) rideSteer -= 5.5 * dt;
-  } else if(keys['arrowleft'] || keys['a']) rotTarget += 2.4 * dt * (mode === 'cling' ? (clFace === 'T' ? 1 : -1) : 1);   // cling is SCREEN-RELATIVE: press toward the block to climb up-and-over (so RIGHT climbs a wall on your right); T re-flips for the top
+  } else if(keys['arrowleft'] || keys['a']) rotTarget += 2.4 * dt * (mode === 'cling' && !clTang(clFace) ? -1 : 1);   // ceiling/top CRAWL matches the floor; only the vertical WALL climb is flipped so RIGHT climbs a wall on your right
 
-  else if(keys['arrowright'] || keys['d']) rotTarget -= 2.4 * dt * (mode === 'cling' ? (clFace === 'T' ? 1 : -1) : 1);
+  else if(keys['arrowright'] || keys['d']) rotTarget -= 2.4 * dt * (mode === 'cling' && !clTang(clFace) ? -1 : 1);
   else if(ptr === null && Math.abs(omega) > 0.02){ rotTarget += omega * dt; omega *= Math.pow(0.03, dt); }
   // momentum launch: the throw keeps advancing the target while airborne
   if(airCarry !== 0 && mode === 'air'){
@@ -773,10 +776,19 @@ function frame(now){
   for(const M of MONSTERS){
     if(mode === 'dead') break;
     if(M.state === 'alive'){
+      if(M.vert){                                                                 // VERTICAL mob: patrol up/down its column; deadly on contact in ANY mode (not ridable/stompable)
+        const rr = Math.round(M.row);
+        if(Math.abs(M.row - rr) < 0.03){ const nxt = rr + M.dir; if(solid(M.c, nxt) || nxt < 1 || nxt > 240){ M.row = rr; M.dir *= -1; } }
+        M.row += M.dir * M.speed * dt;
+        const dV = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
+        if(dV < 0.7 && spawnGuard <= 0 && heroY < M.row + 0.85 && heroY + 0.85 > M.row) die("the tenant.");
+        continue;
+      }
       const cc = Math.round(M.c);
       if(Math.abs(M.c - cc) < 0.03){
         const nxt = mod(cc + M.dir);
-        if(solid(nxt, M.row) || !solid(nxt, M.row - 1)){ M.c = cc; M.dir *= -1; }
+        const grounded = solid(cc, M.row - 1);                                    // item 1: a grounded mob turns at platform edges; an AIR mob (no floor) ignores edges -> patrols wall-to-wall, or loops the ring
+        if(solid(nxt, M.row) || (grounded && !solid(nxt, M.row - 1))){ M.c = cc; M.dir *= -1; }
       }
       M.c += M.dir * M.speed * dt;
       if(M.type === 'mount'){
@@ -1006,6 +1018,13 @@ function frame(now){
     }
   }
   if(mode === 'air'){
+    for(const M of MONSTERS){   // a FLOATING horizontal mob (placed in the air, no floor under it) is deadly to touch midair — not stompable
+      if(M.state !== 'alive' || M.vert || solid(Math.round(M.c), M.row - 1)) continue;
+      const dm = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
+      if(dm < 0.6 && spawnGuard <= 0 && heroY < M.row + 0.85 && heroY + 0.85 > M.row){ die("the tenant."); break; }
+    }
+  }
+  if(mode === 'air'){            // (re-checked: a floating-mob kill above may have ended the air state — skip the physics, but never the frame's render/rAF)
     vy = Math.min(14, vy + 26 * dt);
     let ny = heroY - vy * dt;
     if(vy < 0){
@@ -1020,7 +1039,7 @@ function frame(now){
     } else {
       const r0 = Math.floor(ny + 0.02);
       for(const M of MONSTERS){
-        if(M.state !== 'alive') continue;
+        if(M.state !== 'alive' || M.vert) continue;   // vertical mobs are deadly on contact (handled in the patrol) — not stompable
         const d = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
         if(d < 0.6 && ny <= M.row + 1.08 && ny > M.row + 0.25 && vy > 2){
           if(M.type === 'spiky'){ heroY = M.row + 1; die("its top is teeth too."); break; }
