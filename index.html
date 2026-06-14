@@ -469,10 +469,10 @@ function buildWorld(){
     grp.position.set(P[c][0] - 2.5, r, P[c][1] - 2.5);
     const sm = new THREE.MeshLambertMaterial({ color: 0xc0455a });
     const bm = new THREE.MeshLambertMaterial({ color: 0x6e2a38 });
-    const base = new THREE.Mesh(plate, bm); base.position.y = down ? 0.46 : 0.04; grp.add(base);
+    const base = new THREE.Mesh(plate, bm); base.position.y = down ? 0.96 : 0.04; grp.add(base);   // ceiling spike: plate flush UNDER the block above (was floating at 0.46); floor spike: plate on the block below
     for(const [ox, oz] of [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]]){
       const sp = new THREE.Mesh(coneGeo, sm);
-      sp.position.set(ox, down ? 0.24 : 0.26, oz); sp.rotation.x = down ? Math.PI : 0; sp.rotation.y = Math.PI / 4; grp.add(sp);
+      sp.position.set(ox, down ? 0.74 : 0.26, oz); sp.rotation.x = down ? Math.PI : 0; sp.rotation.y = Math.PI / 4; grp.add(sp);   // hang the cones down from the plate (mirror of the floor spike)
     }
     tower.add(grp); regDepth(grp, [sm, bm]);
     spikeMeshes.push({ key, m: grp });
