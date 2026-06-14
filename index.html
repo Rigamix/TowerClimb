@@ -410,9 +410,14 @@ function buildWorld(){
     body.add(edgeLine(0xd8c4f8));
     if(M.type === 'spiky'){
       const sm2 = new THREE.MeshLambertMaterial({ color: 0xe06a7e });
-      for(const [ox, oz] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]){
-        const sp = new THREE.Mesh(miniCone, sm2);
-        sp.position.set(ox, 0.56, oz); sp.rotation.y = Math.PI / 4; grp.add(sp);
+      const spikeGeo = new THREE.ConeGeometry(0.12, 0.5, 4);          // spikes ALL AROUND: one jutting out of each of the 8 cube corners (between the faces, so the frowns still show)
+      const up = new THREE.Vector3(0, 1, 0);
+      for(const sx of [-1, 1]) for(const sy of [-1, 1]) for(const sz of [-1, 1]){
+        const dir = new THREE.Vector3(sx, sy, sz).normalize();
+        const sp = new THREE.Mesh(spikeGeo, sm2);
+        sp.quaternion.setFromUnitVectors(up, dir);
+        sp.position.copy(dir.clone().multiplyScalar(0.7));
+        grp.add(sp);
       }
       M.faces = attachFaces(grp, 'frown', 'frown');
     } else if(M.type === 'mount'){
