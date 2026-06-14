@@ -54,12 +54,13 @@ const unit2 = (x, z) => { const m = Math.hypot(x, z) || 1; return [x / m, 0, z /
 function cardinalOut(c){ const ox = P[mod(c)][0] - 2.5, oz = P[mod(c)][1] - 2.5; return Math.abs(ox) >= Math.abs(oz) ? [Math.sign(ox) || 1, 0, 0] : [0, 0, Math.sign(oz) || 1]; }
 function faceDirG(c, F){                                   // outward normal of face F (away from the block, toward the clung hero)
   if(F === 'B') return [0, -1, 0];                          // ceiling underside
+  if(F === 'T') return [0, 1, 0];                           // top
   if(F === 'L'){ const a = P[mod(c)], b = P[mod(c - 1)]; return unit2(b[0] - a[0], b[1] - a[1]); }
   if(F === 'R'){ const a = P[mod(c)], b = P[mod(c + 1)]; return unit2(b[0] - a[0], b[1] - a[1]); }
   const o = cardinalOut(c); return F === 'O' ? o : [-o[0], 0, -o[2]];
 }
 const clHeroCol = (bc, F) => F === 'L' ? mod(bc - 1) : F === 'R' ? mod(bc + 1) : mod(bc);   // column the hero occupies while clung
-const clTang = F => F === 'B' || F === 'O' || F === 'I';    // walk-along faces (ceiling/outer/inner, like an inverted floor); only L/R are climbed
+const clTang = F => F === 'B' || F === 'T';                 // horizontal faces you crawl along; L/R/O/I are vertical faces you walk up the side of
 
 // --- scene scaffolding ---
 const canvas = document.getElementById('c');
@@ -218,7 +219,7 @@ function populateCustom(){
   for(const sl of (CUSTOM.stickLines || [])){   // per-face sticky → the editor painted these EXACT faces (single-sided)
     const mm = sl.trim().match(/^(\d+),(\d+)\s+([TBLROI]+)$/); if(!mm) continue;
     const c = +mm[1], wr = (+mm[2]) + BASE, f = mm[3];
-    for(const F of f){ if('BLROI'.includes(F)) faceSet.add(Kk(c, wr) + ',' + F); }   // T ignored (you never cling to a top)
+    for(const F of f){ if('BLROIT'.includes(F)) faceSet.add(Kk(c, wr) + ',' + F); }   // T = a sticky top you can wrap onto
   }
   const floorsDesc = bandFloors.slice().sort((a, b) => b - a);   // top band first
   CUSTOM.bands = floorsDesc.map(fEd => {
@@ -309,10 +310,11 @@ function buildWorld(){
     }
     if(pads.has(key)){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0xffd34d })); p.position.y = 0.5; m.add(p); mats.push(p.material); }
     // per-face sticky plates: drawn ONLY on the exact painted faces (single-sided), from the same faceSet physics reads
-    for(const F of 'BLROI'){
+    for(const F of 'BLROIT'){
       if(!faceSet.has(key + ',' + F)) continue;
       const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0x6ee37a }));
       if(F === 'B'){ p.position.y = -0.5; }
+      else if(F === 'T'){ p.position.y = 0.5; }
       else { const n = faceDirG(c, F);
         if(Math.abs(n[0]) > Math.abs(n[2])) p.rotation.z = Math.PI / 2; else p.rotation.x = Math.PI / 2;
         p.position.set(n[0] * 0.5, 0, n[2] * 0.5); }
@@ -529,7 +531,10 @@ const col = () => mod(K);
 const rows = () => { const a = Math.floor(heroY + 0.02), b = Math.floor(heroY + 0.95); return a === b ? [a] : [a, b]; };
 function canEnter(k2){
   const c = mod(k2);
-  if(mode === 'cling' && clCell && (clFace === 'O' || clFace === 'I')) return faced(c, clCell[1], clFace);   // outer/inner walk: slide only along the painted run (the block sits at the hero's own row, so the normal solid test would wrongly block it)
+  if(mode === 'cling' && clCell && clTang(clFace)){          // horizontal crawl (ceiling/top): slide only along the painted run, with body room
+    const r = clCell[1], br1 = clFace === 'T' ? r + 1 : r - 1;
+    return faced(c, r, clFace) && solid(c, r) && !solid(c, br1);
+  }
   if(!rows().every(r => !solid(c, r))) return false;
   if(mode === 'air' && vy < 0 && solid(c, Math.floor(heroY + 0.999))) return false;  // no sliding under ceilings mid-rise
   return true;
@@ -881,58 +886,53 @@ function frame(now){
     let [bc, br] = clCell;
     if(!solid(bc, br) || !faced(bc, br, clFace)){ clDetach('peel'); }       // the block or its painted face is gone
     else if(climbA <= 0){                                                    // (while a face-change snap plays, it owns the hero)
-      if(keys[' '] || keys['arrowup'] || keys['w']){ clDetach('jump'); }     // jump off the surface
+      if(keys[' ']){ clDetach('jump'); }                                     // SPACE drops off
       else if(clTang(clFace)){
-        // ===== walk along a surface (B ceiling / O outer / I inner): the chase slides K, like a floor — just inverted =====
-        const F = clFace, bodyR = (F === 'B') ? br - 1 : br;       // ceiling hangs below; outer/inner sit beside the block's own row
+        // ----- HORIZONTAL face (B ceiling / T top): crawl tangentially (the chase owns K); at the run's edge, wrap onto the side -----
+        const isTop = clFace === 'T', bodyR = isTop ? br + 1 : br - 1;
         heroY = bodyR; clT = K;
         if(spikes.has(Kk(col(), bodyR))){ die("the spikes."); }
         else {
-          const hH = angOf(K) - midOf(K - 1), hH2 = midOf(K) - angOf(K);
-          const daH = (-rot) - angOf(K);
-          const gH = daH >= 0 ? Math.min(0.5, daH / (2 * hH2)) : Math.max(-0.5, daH / (2 * hH));
-          if(Math.abs(gH) > 0.04) clFacing = Math.sign(gH);
-          if(faced(col(), br, F) && solid(col(), br)){ clCell = [col(), br]; }   // walked onto the next block, same surface
-          else {
-            // ran off the end — round the corner onto a connected face (with rotation), else drop
-            const s = clFacing, prev = mod(col() - s), cur = col();
-            if(faced(prev, br, s > 0 ? 'R' : 'L')){                          // convex: fold onto the last block's side wall
-              const F2 = s > 0 ? 'R' : 'L'; clCell = [prev, br]; clFace = F2; clT = heroY; clSign = s; clFacing = s;
-              clSnap(prev, clHeroCol(prev, F2), br, heroY + 0.5); showMsg("around the corner.");
-            } else if(solid(cur, br) && faced(cur, br, s > 0 ? 'L' : 'R')){    // concave: surface meets a wall going up
-              const F2 = s > 0 ? 'L' : 'R'; clCell = [cur, br]; clFace = F2; clT = heroY; clSign = -s; clFacing = -s;
-              let d = ((clHeroCol(cur, F2) - col()) % N + N) % N; if(d > N / 2) d -= N; K += d;
-              clSnap(cur, clHeroCol(cur, F2), br, heroY + 0.5); showMsg("up the wall.");
-            } else if(F === 'B' && faced(prev, br, 'O')){                      // ceiling -> outer face, around a convex tower corner
-              clCell = [prev, br]; clFace = 'O'; clT = heroY; clSign = s; clFacing = s;
-              clSnap(prev, clHeroCol(prev, 'O'), br, heroY + 0.5); showMsg("out onto the face.");
-            } else { clDetach('slip'); }
+          if(faced(col(), br, clFace) && solid(col(), br)){ clCell = [col(), br]; bc = col(); }   // crawled onto the next block
+          const hH = angOf(K) - midOf(K - 1), hH2 = midOf(K) - angOf(K), daH = (-rot) - angOf(K);
+          const gH = daH >= 0 ? Math.min(0.5, daH / (2 * hH2)) : Math.max(-0.5, daH / (2 * hH));   // gH<0 = pushing toward c-1 (left); gH>0 = toward c+1 (right)
+          if(Math.abs(gH) > 0.03){                                           // leaning toward an edge (caps at LEAN=0.04 when the crawl is blocked there)
+            const s = Math.sign(gH);
+            if(!faced(mod(bc + s), br, clFace)){                              // no more of this surface that way -> wrap around the corner
+              const F2 = s < 0 ? 'L' : 'R';
+              if(faced(bc, br, F2)){                                          // a side face to wrap onto
+                const oc = col(); clFace = F2; heroY = clT = isTop ? br + 1 : br;   // arrive at the side's TOP (from a top) or BOTTOM (from a ceiling)
+                const hcN = clHeroCol(bc, F2); let dd = ((hcN - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd;
+                clFacing = s; clSnap(oc, hcN, br + (isTop ? 1 : 0), heroY); showMsg("around the corner.");
+              } else clDetach('slip');                                        // nothing connected -> let go
+            }
           }
         }
       } else {
-        // ===== climb a wall (L/R): the push drives the climb; at the top the surface wraps onto a ceiling, else vaults =====
-        const steer = rotTarget - rot;
+        // ----- VERTICAL face (L/R/O/I): LEFT walks one way around the block, RIGHT the other; wrap to the next sticky face or dismount -----
+        const goL = keys['arrowleft'] || keys['a'], goR = keys['arrowright'] || keys['d'];
+        const upLeft = (clFace === 'L' || clFace === 'O');                    // on these, LEFT climbs UP (a consistent walk around the block)
         let dir = 0;
-        if(Math.abs(steer) > 1e-3) dir = (Math.sign(steer) === clSign) ? 1 : -1;
-        rotTarget = rot;                                  // consume the push as climb, not rotation
+        if(goL) dir = upLeft ? 1 : -1; else if(goR) dir = upLeft ? -1 : 1;
+        rotTarget = rot;                                                      // a wall never spins the tower
         if(dir !== 0){ clT += dir * CLING_SPD * dt; clFacing = dir; }
         heroY = clT;
-        const hc = col(), feet = Math.floor(heroY + 0.02), headR = Math.floor(heroY + 0.92);
+        const hc = col(), feet = Math.floor(heroY + 0.02);
         if(spikes.has(Kk(hc, feet))){ die("the spikes."); }
-        else if(headR > br && faced(hc, headR, 'B') && solid(hc, headR)){                    // head reaches a sticky ceiling -> wrap UNDER it (climb-up flows into a crawl, like turning a corner)
-          clCell = [hc, headR]; clFace = 'B'; heroY = clT = headR - 1; clSnap(bc, hc, headR, br + 0.5); showMsg("under the ledge.");
+        else if(feet > br){                                                   // walked up past this block
+          if(faced(bc, br + 1, clFace) && solid(bc, br + 1)){ clCell = [bc, br + 1]; }            // continue up the same wall
+          else if(faced(bc, br, 'T')){                                                            // sticky TOP at the run's top -> wrap onto it
+            const oc = col(); clFace = 'T'; heroY = clT = br + 1;
+            let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd;
+            clSnap(oc, bc, br + 1, br + 0.5); showMsg("onto the top.");
+          } else clDetach('slip');                                                                // path ends -> dismount
         }
-        else if(feet > br){
-          if(faced(bc, br + 1, clFace) && solid(bc, br + 1)){ clCell = [bc, br + 1]; }       // continue up the same wall
-          else if(!solid(bc, br + 1) && !solid(hc, br + 1)){                                 // vault over the lip onto the top
-            let d = ((bc - hc) % N + N) % N; if(d > N / 2) d -= N; K += d;
-            heroY = br + 1; clT = heroY; vy = 0; mode = 'ground';
-            clSnap(hc, bc, br + 1, br + 0.5); clCell = null; clFace = null; showMsg("over the lip.");
-          } else { clT = Math.min(clT, br + 0.97); heroY = clT; }                            // capped: hold at the lip
-        }
-        else if(feet < br){
-          if(faced(bc, br - 1, clFace) && solid(bc, br - 1)){ clCell = [bc, br - 1]; }       // continue down the same wall
-          else { clDetach('slip'); }                                                          // off the bottom -> air
+        else if(feet < br){                                                   // walked down past this block
+          if(faced(bc, br - 1, clFace) && solid(bc, br - 1)){ clCell = [bc, br - 1]; }            // continue down the same wall
+          else if(faced(bc, br, 'B')){                                                            // sticky UNDERSIDE at the run's bottom -> wrap under it
+            const oc = col(); clFace = 'B'; heroY = clT = br - 1;
+            clSnap(oc, bc, br, br - 0.5); showMsg("under the ledge.");
+          } else clDetach('slip');                                                                // path ends -> dismount
         }
       }
     }
@@ -953,6 +953,7 @@ function frame(now){
       if(cspikes.has(Kk(col(), head)) && head !== prevHead){ die("the ceiling spikes."); ny = head; }   // rose into down-pointing spikes
       else if(solid(col(), head)){
         if(faced(col(), head, 'B') && head !== prevHead && clGuard <= 0){ heroY = head - 1; clAttach(col(), head, 'B', Math.sign(rotVel) || 1); ny = head - 1; squash = 0.14; showMsg("stuck. the ceiling holds you."); }
+        else if((faced(col(), head, 'O') || faced(col(), head, 'I')) && clGuard <= 0){ const FF = faced(col(), head, 'O') ? 'O' : 'I'; heroY = head; clAttach(col(), head, FF, 1); ny = head; squash = 0.14; showMsg("stuck."); }   // jump up into a front/inner sticky face -> grab it
         else { ny = head - 1; vy = 0.5; }
       }
     } else {
