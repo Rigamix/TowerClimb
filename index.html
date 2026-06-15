@@ -13,6 +13,8 @@
   #redo{position:fixed;bottom:24px;right:14px;color:#cfe0ff;font-size:13px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:8px 13px;cursor:pointer;}
   #flip{position:fixed;bottom:24px;left:14px;color:#cfe0ff;font-size:13px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:8px 13px;cursor:pointer;}
   #flip.on{color:#ffd34d;border-color:#ffd34d;background:#3a3320aa;}
+  #traj{position:fixed;bottom:24px;left:96px;color:#cfe0ff;font-size:13px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:8px 13px;cursor:pointer;}
+  #traj.on{color:#ffd34d;border-color:#ffd34d;background:#3a3320aa;}
   #bigmsg{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);color:#ffd34d;font:700 27px/1.25 'Comic Sans MS','Chalkboard SE','Marker Felt',cursive;text-align:center;max-width:78vw;pointer-events:none;opacity:0;transition:opacity .25s;text-shadow:0 2px 10px #000c,0 0 3px #000;}
 </style>
 </head>
@@ -23,6 +25,7 @@
 <div id="coins">&#9670; 0</div>
 <div id="redo">&#8635; room</div>
 <div id="flip">&#8644; flip</div>
+<div id="traj">&#10549; path</div>
 <div id="bigmsg"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>window.TOWER_LEVEL = {"code":"ROOM rows=64 width=20\n....................\n................o...\n................#...\nS....o..K...o......#\n#...........#.......\n#.o....#P#.##.##..##\n#.#D#^^...###.#...m#\n#^.....######P#^P###\n.#.......o#......X..\n..SN................\n..............##....\n..^^###P.#..#N.o###.\n...###.#...#o.K.....\n..####.#o#.#........\nC#####.#.#o#..x.###P\nO####v##^####P######\n......######vo..X...\n.....o#vvvv.........\n....#.#.....o.......\n...#v.#K..........X.\nSN#..o##....^...NNN#\nK.....##...##CP#...#\n@.#..Y##...#o..#...#\n###P^####WP#.@.#^^^#\n......^##D###P##..#.\n...#.K...o####....#.\n...###v#..#..#....#.\n.o.#......####....#.\n...##.....#..#....#.\n...##..#.###.#....#.\n.x..#..#.....#....#.\n#########D####....SP\n......#.#..........#\n......#.#.#o.o....K#\n......#.#...#...####\n......#.#..ov#P#...#\n......#.#.#...v##..#\n......#.#.#...o.#..#\n......#.....@...#..#\n......###D#########S\n#......#..#.....####\n##.....#..#.#v^K....\n#......#..#....##...\n#.##...#..#o......##\n####...#..#.........\n#.##.#.#..#........o\n#x.#...#..#.........\n#######S..########DP\n..K#.o.####....#....\n..##......#....#....\n####.o...o#....#..##\n#.##......#....#..##\n#v.#......#....#..#.\n...#.#o.o.#....#..##\n..####..x.#....#....\n######P#S##....###D#\n##..^......^.......#\n...o#......#........\n.K..#......#......#.\nv#..#......#......#.\n.#..#......#......##\n.#.o#......#...#####\n.##.#......#.xo.....\n#####......S##P####D\nDIVIDERS 8,16,24,32,40,48,56\nSTICK\n11,49 L\n11,50 L\n11,51 L\n10,57 I\n11,57 B\n16,61 BLT\n12,47 R\n7,56 B\n8,56 B\n9,56 B\n7,42 R\n7,43 R","dividers":[8,16,24,32,40,48,56]};</script>
@@ -116,7 +119,7 @@ function heroCompile(shader){   // (ART FORK) hero = single colour with only a S
       'float hUp = normalize(vHN).y; vec3 hHSV = h_rgb2hsv(diffuseColor.rgb); if(hUp>0.55){ hHSV.z=min(1.0,hHSV.z*1.04); } else { hHSV.x=fract(hHSV.x + vHN.x*0.022 + vHN.z*0.013); hHSV.z*=0.94; } vec3 hCol = h_hsv2rgb(hHSV);\n'
     + ' vec3 hAP = abs(vHP); vec3 hAN = abs(normalize(vHN));\n'
     + ' float hIP = hAN.x>0.5 ? max(hAP.y,hAP.z) : ( hAN.y>0.5 ? max(hAP.x,hAP.z) : max(hAP.x,hAP.y) );\n'   // in-plane distance from face centre
-    + ' if( 0.5 - hIP < 0.05 ) hCol = vec3(0.11,0.45,0.92);\n'   // INSET saturated-blue outline band, inside the cube -> never pokes into the floor
+    + ' if( 0.5 - hIP < 0.05 ) hCol = emissive;\n'   // INSET outline band — colour driven by the material's emissive (blue normally, RED during the death flash)
     + ' float hFog = smoothstep(11.0,33.0,length(vViewPosition)); hCol = mix(hCol, vec3(0.937,0.902,0.824), hFog);\n'   // fog the lit colour, then x shadow so the shadow stays pitch black
     + ' gl_FragColor = vec4( hCol * getShadowMask(), diffuseColor.a );');
 }
@@ -130,6 +133,16 @@ function blockCompile(shader){   // (ART FORK) DEFAULT blocks: top = base colour
     .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>')
     .replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
       'float bUp = normalize(vBN).y; float bH = clamp((vBY-2.0)/60.0,0.0,1.0); vec3 bSrc = bUp>0.55 ? diffuseColor.rgb : vec3(0.969,0.506,0.663); vec3 bHSV = b_rgb2hsv(bSrc); bHSV.x = fract(bHSV.x - bH*0.05); if(bUp>0.55){ bHSV.z = min(1.0, bHSV.z*1.08); } else if((vBN.x+vBN.z) > 0.0){ bHSV.z *= 0.82; } vec3 bCol = b_hsv2rgb(bHSV); float bFog = smoothstep(11.0,33.0,length(vViewPosition)); bCol = mix(bCol, vec3(0.937,0.902,0.824), bFog); gl_FragColor = vec4( bCol * getShadowMask(), diffuseColor.a );');   // 2 side tones; fog applied to LIT colour then x shadow -> shadow stays pitch black
+}
+function mobCompile(shader){   // (ART) "stomp" mob: TOP face = green (the safe landing surface), every SIDE face = the body's red. Colours the actual cube face, no extra plate.
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vMN;')
+    .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n\tvMN = objectNormal;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vMN;')
+    .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>')
+    .replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+      'vec3 mCol = normalize(vMN).y > 0.55 ? vec3(0.33,0.83,0.46) : diffuseColor.rgb; gl_FragColor = vec4( mCol * getShadowMask(), diffuseColor.a );');
 }
 // (ART FORK) interactable items: NO drop shadow
 const artOutMat = new THREE.LineBasicMaterial({ color: 0x241f14 });
@@ -188,12 +201,12 @@ function attachFaces(grp, sideKind, topKind){
     const fg = makeFace(sideKind);
     const a2 = f2 * Math.PI / 2;
     fg.rotation.y = a2;
-    fg.position.set(Math.sin(a2) * 0.43, 0.04, Math.cos(a2) * 0.43);
+    fg.position.set(Math.sin(a2) * 0.47, 0.04, Math.cos(a2) * 0.47);   // pushed proud of the 0.82-scaled body so the decal doesn't z-fight
     grp.add(fg); list.push(fg);
   }
   const tg = makeFace(topKind);
   tg.rotation.x = -Math.PI / 2;
-  tg.position.y = 0.44;
+  tg.position.y = 0.47;   // sit clearly above the top face (was z-fighting)
   grp.add(tg); list.push(tg);
   return list;
 }
@@ -215,6 +228,7 @@ function regDepthOFF(mesh, materials){
 const hero = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0x33c2e6 }));   // (ART FORK) cyan-blue hero
 hero.scale.set(0.92, 0.92, 0.92);
 hero.material.onBeforeCompile = heroCompile; hero.material.customProgramCacheKey = () => 'arthero'; hero.material.fog = false; hero.material.needsUpdate = true;   // (ART FORK) subtle per-face variation + manual fog
+hero.material.emissive = new THREE.Color(0x1c73eb);   // (ART FORK) outline colour (saturated blue); die() flips it to red, resetCommon restores it
 // (ART FORK) the hero outline is drawn INSIDE the shape by heroCompile (inset edge band) — no hull, so it never pokes into the floor
 tower.add(hero);
 // (ART FORK) hero eyes — two LINE marks, billboarded to face the camera and ALWAYS drawn on top (never occluded)
@@ -225,7 +239,7 @@ const heroFace = new THREE.Group();
 scene.add(heroFace);
 const _hw = new THREE.Vector3(), _hd = new THREE.Vector3();
 // #3: a subtle dashed guide showing where the hero will fall/land (a child of the tower so it rotates with the column)
-const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x6fc7ff, transparent: true, opacity: 0.12, dashSize: 0.28, gapSize: 0.22 }));   // #2: fainter still + only shown when the path curves sideways
+const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x6fc7ff, transparent: true, opacity: 0.5, dashSize: 0.28, gapSize: 0.22 }));   // landing guide (shown only when toggled on)
 trajLine.frustumCulled = false; trajLine.visible = false; tower.add(trajLine);
 // #1: glow ONLY the top face of the block under the hero (a plate, not the whole cube)
 const glowPlate = new THREE.Mesh(plate, new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.5 }));
@@ -257,7 +271,7 @@ function updateDeathParts(dt){
   deathParts = deathParts.filter(p => { if(p.life <= 0){ tower.remove(p.m); return false; } return true; });
 }
 function updateTrajectory(){
-  if(mode !== 'air'){ if(trajLine.visible) trajLine.visible = false; return; }
+  if(!trajOn || mode !== 'air'){ if(trajLine.visible) trajLine.visible = false; return; }
   let y = heroY, v = vy, fcol = K;                                            // fcol = continuous column; it drifts sideways with the launch momentum
   let colRate = Math.max(-6, Math.min(6, airCarry));                          // sideways drift (cols/sec) — matches the air airCarry term, capped to the chase speed
   const pts = []; const dt2 = 0.03, floorY = (CUSTOM ? CUSTOM.winY : 12) - 1.5;
@@ -271,8 +285,8 @@ function updateTrajectory(){
     y = ny;
     if(y < floorY) break;
   }
-  // #2: only show the guide when the path actually CURVES sideways (>~0.4 col of drift); a straight vertical bounce/fall needs no guide
-  if(landed && pts.length > 2 && Math.abs(fcol - startCol) > 0.4){ trajLine.geometry.setFromPoints(pts); trajLine.computeLineDistances(); trajLine.visible = true; }
+  // show the landing guide whenever it's toggled on and the fall reaches a landing (curve no longer required)
+  if(landed && pts.length > 2){ trajLine.geometry.setFromPoints(pts); trajLine.computeLineDistances(); trajLine.visible = true; }
   else trajLine.visible = false;
 }
 
@@ -505,12 +519,12 @@ function buildWorld(){
   }
   for(const M of MONSTERS){
     const grp = new THREE.Group();
-    const COLS = { normal: [0x8f5fd4, 0xc9aef0], spiky: [0xc0455a, 0x6e2a38], mount: [0x4fae6f, 0x8fe3a8] };
+    const COLS = { normal: [0xd64a4a, 0xc9aef0], spiky: [0xc0455a, 0x6e2a38], mount: [0x4fae6f, 0x8fe3a8] };   // (ART) normal = "stomp" mob: red body + green TOP FACE via shader (no cap plate)
     const [bc2, cc2] = COLS[M.type] || COLS.normal;
     const bm = new THREE.MeshLambertMaterial({ color: bc2 });
     const body = new THREE.Mesh(box, bm); body.scale.set(0.82, 0.82, 0.82); grp.add(body);
-    const cap = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: cc2 }));
-    cap.scale.set(0.84, 1, 0.84); cap.position.y = 0.42; grp.add(cap);
+    if(M.type === 'normal'){ bm.onBeforeCompile = mobCompile; bm.customProgramCacheKey = () => 'artmob'; }   // colour the actual top face green; no cap plate
+    else { const cap = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: cc2 })); cap.scale.set(0.84, 1, 0.84); cap.position.y = 0.42; grp.add(cap); }
     body.add(edgeLine(0xd8c4f8));
     if(M.type === 'spiky'){
       const sm2 = new THREE.MeshLambertMaterial({ color: 0xe06a7e });
@@ -605,7 +619,7 @@ let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0
 let camCornerPull = 0;
 let sandKey = null, sandT = 0;   // the sand block currently being stood on + how long (resets when you step off)
 let padCombo = 0, padArmKey = null, padArmT = 0;   // jump-pad: consecutive-bounce counter (2,3,4,5 sq) + a settle timer so a fresh bounce waits until the bottom is flat
-const CLING_SPD = 2.6;
+const CLING_SPD = 6.4;   // match the ground roll speed (~one cube per π/20s at ROTMAX); was 2.6 (~2.4x slower)
 let currentRoom = 0, bankCoins = 0, wonRun = false, r1CoinsLeft = 4, crackCreaked = false, spawnGuard = 0;
 const CRACK_V = 11;
 const TOPS = [58, 52, 46, 35, 29, 22];
@@ -628,7 +642,7 @@ const CRACK_MSGS = ["barely a tap. fall like you mean it.", "not even a dent —
 function hud(){ coinEl.innerHTML = '&#9670; ' + coinCount + (keyCount > 0 ? ' &nbsp;&#128273;&#215;' + keyCount : ''); }
 function die(what){
   if(mode === 'dead') return;
-  mode = 'dead'; respawnT = 1.3; deathBurstT = 0.1; hero.material.color.setHex(0xe23a3a);   // flash red, then burst into particles (after deathBurstT)
+  mode = 'dead'; respawnT = 1.3; deathBurstT = 0.1; hero.material.color.setHex(0xe23a3a); hero.material.emissive.setHex(0xe23a3a);   // flash red (body + outline), then burst into particles (after deathBurstT)
   showMsg(what + " again, from this room.");
 }
 function mountUnder(sup){
@@ -657,7 +671,7 @@ function resetCommon(){
   airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
   clCell = null; clFace = null; clGuard = 0; clCamPull = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0; clVaultTop = false;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
-  hero.material.color.setHex(HERO_COL); clearDeathParts(); deathBurstT = 0;   // restore the hero after a death burst
+  hero.material.color.setHex(HERO_COL); hero.material.emissive.setHex(0x1c73eb); clearDeathParts(); deathBurstT = 0;   // restore the hero (body + blue outline) after a death burst
 }
 function resetRun(msg){
   buildWorld(); resetCommon();
@@ -713,7 +727,8 @@ let downX = 0, downT = 0, tapMoved = false;                            // single
 let tapT = 0, tapKind = '', tapTargetRot = 0, tapSteer = 0, tapMark = 0;
 const SENS = 0.0045;   // drag sensitivity
 let flipControls = false; try { flipControls = localStorage.getItem('tcFlip') === '1'; } catch(e){}   // on-screen toggle: invert ALL input so it feels like rotating the character, not the tower
-window.addEventListener('pointerdown', e => { if(e.target.id === 'redo' || e.target.id === 'flip') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); downX = e.clientX; downT = lastT; tapMoved = false; tapT = 0; dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
+let trajOn = false; try { trajOn = localStorage.getItem('tcTraj') === '1'; } catch(e){}   // landing-guide toggle (OFF by default)
+window.addEventListener('pointerdown', e => { if(e.target.id === 'redo' || e.target.id === 'flip' || e.target.id === 'traj') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); downX = e.clientX; downT = lastT; tapMoved = false; tapT = 0; dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
 window.addEventListener('pointermove', e => {
   if(e.pointerId !== ptr) return;
   const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(8, now - lastT);
@@ -753,6 +768,12 @@ function syncFlip(){ if(flipEl) flipEl.classList.toggle('on', flipControls); }
 syncFlip();
 if(flipEl) flipEl.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation();
   flipControls = !flipControls; try { localStorage.setItem('tcFlip', flipControls ? '1' : '0'); } catch(err){} syncFlip();
+});
+const trajEl = document.getElementById('traj');
+function syncTraj(){ if(trajEl) trajEl.classList.toggle('on', trajOn); }
+syncTraj();
+if(trajEl) trajEl.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation();
+  trajOn = !trajOn; try { localStorage.setItem('tcTraj', trajOn ? '1' : '0'); } catch(err){} syncTraj();
 });
 const keys = {};
 addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key.toLowerCase() === 'r' && mode !== 'dead') die("you called it."); });
