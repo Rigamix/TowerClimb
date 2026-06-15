@@ -163,6 +163,31 @@ trajLine.frustumCulled = false; trajLine.visible = false; tower.add(trajLine);
 // #1: glow ONLY the top face of the block under the hero (a plate, not the whole cube)
 const glowPlate = new THREE.Mesh(plate, new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.5 }));
 glowPlate.visible = false; tower.add(glowPlate);
+// death: the hero flashes red then bursts into small red cubes
+const HERO_COL = 0xd9a13a, partGeo = new THREE.BoxGeometry(0.22, 0.22, 0.22);
+const partMat1 = new THREE.MeshBasicMaterial({ color: 0xe23a3a }), partMat2 = new THREE.MeshBasicMaterial({ color: 0xff6a5a });
+let deathParts = [], deathBurstT = 0;
+function clearDeathParts(){ for(const p of deathParts) tower.remove(p.m); deathParts = []; }
+function burstDeath(){
+  clearDeathParts();
+  for(let i = 0; i < 18; i++){
+    const m = new THREE.Mesh(partGeo, i % 3 ? partMat1 : partMat2);
+    m.position.copy(hero.position); m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    tower.add(m);
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1), sp = 2.5 + Math.random() * 4.5;
+    deathParts.push({ m, vx: Math.sin(ph) * Math.cos(th) * sp, vy: Math.cos(ph) * sp + 3.5, vz: Math.sin(ph) * Math.sin(th) * sp, life: 0.85 + Math.random() * 0.4 });
+  }
+}
+function updateDeathParts(dt){
+  if(!deathParts.length) return;
+  for(const p of deathParts){
+    p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
+    p.vy -= 22 * dt; p.life -= dt;
+    p.m.scale.setScalar(Math.max(0.02, p.life / 0.85));
+    p.m.rotation.x += dt * 7; p.m.rotation.z += dt * 5;
+  }
+  deathParts = deathParts.filter(p => { if(p.life <= 0){ tower.remove(p.m); return false; } return true; });
+}
 function updateTrajectory(){
   if(mode !== 'air'){ if(trajLine.visible) trajLine.visible = false; return; }
   let y = heroY, v = vy, fcol = K;                                            // fcol = continuous column; it drifts sideways with the launch momentum
@@ -522,7 +547,7 @@ function showMsg(t){ /* messages disabled */ }
 function hud(){ coinEl.innerHTML = '&#9670; ' + coinCount + (keyCount > 0 ? ' &nbsp;&#128273;&#215;' + keyCount : ''); }
 function die(what){
   if(mode === 'dead') return;
-  mode = 'dead'; respawnT = 1.3;
+  mode = 'dead'; respawnT = 1.3; deathBurstT = 0.1; hero.material.color.setHex(0xe23a3a);   // flash red, then burst into particles (after deathBurstT)
   showMsg(what + " again, from this room.");
 }
 function mountUnder(sup){
@@ -551,6 +576,7 @@ function resetCommon(){
   airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
   clCell = null; clFace = null; clGuard = 0; clCamPull = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0; clVaultTop = false;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
+  hero.material.color.setHex(HERO_COL); clearDeathParts(); deathBurstT = 0;   // restore the hero after a death burst
 }
 function resetRun(msg){
   buildWorld(); resetCommon();
@@ -597,7 +623,7 @@ function setRot(target){
 
 // --- input ---
 let ptr = null, lastX = 0, lastT = 0, dragVel = 0, lastDrag = -1e9;
-const SENS = 0.0040;   // drag sensitivity (lowered)
+const SENS = 0.0045;   // drag sensitivity
 let flipControls = false; try { flipControls = localStorage.getItem('tcFlip') === '1'; } catch(e){}   // on-screen toggle: invert ALL input so it feels like rotating the character, not the tower
 window.addEventListener('pointerdown', e => { if(e.target.id === 'redo' || e.target.id === 'flip') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
 window.addEventListener('pointermove', e => {
@@ -1015,8 +1041,18 @@ function frame(now){
               else if(!solid(bc, br + 1)){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); clVaultTop = true; showMsg("over the top."); }   // item 1b: roll up & over onto the block's own (clear) top, then stand on it
               else clDetach('slip');                                          // nowhere to go -> let go
             }
-          } else {                                                            // pushing DOWN
-            if(dnWall){ clT -= CLING_SPD * dt; clFacing = -1; }
+          } else {                                                            // pushing DOWN / toward the OPEN side (away from the wall)
+            const feetR = Math.floor(heroY + 0.02), openCol = mod(2 * col() - bc);   // FLEXIBILITY: touching a regular block on the open side at your row counts as standing on it -> single-block vault, like the ground
+            if(solid(openCol, feetR) && !solid(openCol, feetR + 1) && !solid(col(), feetR + 1) && !spikes.has(Kk(openCol, feetR + 1))){
+              const oc = col(); let sgnc = openCol - oc; if(sgnc > N / 2) sgnc -= N; else if(sgnc < -N / 2) sgnc += N;
+              K += sgnc; heroY = feetR + 1; vy = 0; mode = 'ground'; clCell = null; clFace = null; clGuard = 0.2;
+              rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
+              climbA = CLIMB_DUR;
+              climbPivot = [(P[oc][0] + P[openCol][0]) / 2 - 2.5, feetR + 1, (P[oc][1] + P[openCol][1]) / 2 - 2.5];
+              climbFrom = [P[oc][0] - 2.5, feetR + 0.5, P[oc][1] - 2.5];
+              climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[openCol][0] - P[oc][0], 0, P[openCol][1] - P[oc][1])).normalize();
+              tip = 0; showMsg("over the block.");
+            } else if(dnWall){ clT -= CLING_SPD * dt; clFacing = -1; }
             else {                                                            // reached the BOTTOM of the wall
               heroY = clT = br;
               if(faced(bc, br, 'B')){ clFace = 'B'; heroY = clT = br - 1; clSnap(vF, 'B', bc, br); showMsg("under the ledge."); }   // sticky underside -> wrap under it
@@ -1281,7 +1317,9 @@ function frame(now){
   hero.quaternion.copy(q);
   hero.scale.set(0.92 + squash * 0.5, 0.92 - squash * 0.8, 0.92 + squash * 0.5);
   }
-  hero.visible = mode !== 'dead';
+  if(mode === 'dead' && deathBurstT > 0){ deathBurstT -= dt; if(deathBurstT <= 0) burstDeath(); }   // brief red flash, then explode
+  hero.visible = mode !== 'dead' || deathBurstT > 0;
+  updateDeathParts(dt);
 
   // #1/#7: subtle glow on the TOP FACE of the block under the hero (a plate, not the whole cube) — not while clinging
   let glowC = -1, glowR = -1;
