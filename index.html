@@ -546,6 +546,7 @@ const ENTRIES = [[1, 59], [4, 53], [10, 47], [14, 36], [8, 30], [4, 23], [6, 15]
 const ROOM_NAMES = ['the deck', 'room one: the gap', 'room two: the ledge', 'room three: the shaft', 'room four: the tenant', 'room five: the cracked floor', 'room six: the band run'];
 function roomIndex(y){ let i = 0; for(const t of TOPS) if(y < t + 0.95) i++; return i; }
 const TOPPLE_A = 5.5, LEAN = 0.04, ROTMAX = 2.0, CHASE_K = 12;
+const EDGE_STEP = 0.96;   // walking off an edge / down a drop commits to the fall only near 90° of roll (1.0 = a full 90°), not at the 45° midpoint — so you can teeter over the brink while holding
 let rotTarget = 0, carryFrom = 0, carryT = 0, carryDur = 0.32;
 let carrier = null, rideFrac = null, rideSteer = 0, justLeft = null;
 let jlTimer = 0;
@@ -618,14 +619,19 @@ function canEnter(k2){
   return true;
 }
 function setRot(target){
+  const r0 = Math.floor(heroY + 0.02) - 1;   // support row: stepping toward an open/lower column is a "drop" you commit only near 90°
   for(let guard = 0; guard < N * 2; guard++){
     const a = -target;
-    if(a >= midOf(K) && canEnter(K + 1)){ K += 1; continue; }
-    if(a < midOf(K - 1) && canEnter(K - 1)){ K -= 1; continue; }
+    const enterR = canEnter(K + 1), enterL = canEnter(K - 1);
     const hR = midOf(K) - angOf(K), hL = angOf(K) - midOf(K - 1);
-    let hi = midOf(K) - 1e-6, lo = midOf(K - 1);
-    if(!canEnter(K + 1)) hi = angOf(K) + 2 * hR * LEAN;
-    if(!canEnter(K - 1)) lo = angOf(K) - 2 * hL * LEAN;
+    const dropR = mode === 'ground' && enterR && !solid(K + 1, r0);   // a continuing floor rolls over at the 45° midpoint; an EDGE / step-down waits until ~90° so you can teeter over the brink
+    const dropL = mode === 'ground' && enterL && !solid(K - 1, r0);
+    const stepR = dropR ? angOf(K) + 2 * hR * EDGE_STEP : midOf(K);
+    const stepL = dropL ? angOf(K) - 2 * hL * EDGE_STEP : midOf(K - 1);
+    if(a >= stepR && enterR){ K += 1; continue; }
+    if(a < stepL && enterL){ K -= 1; continue; }
+    const hi = enterR ? (dropR ? angOf(K) + 2 * hR : midOf(K) - 1e-6) : angOf(K) + 2 * hR * LEAN;   // a drop lets the cube lean clear to 90°; a wall only ~LEAN
+    const lo = enterL ? (dropL ? angOf(K) - 2 * hL : midOf(K - 1)) : angOf(K) - 2 * hL * LEAN;
     const ca = Math.min(hi, Math.max(lo, a));
     if(ca !== a){ rotLag += (rot - (-ca)); rot = -ca; omega = 0; return; }
     rot = target; return;
@@ -752,8 +758,13 @@ function frame(now){
     if(jlTimer <= 0) justLeft = null;
   }
 
+  const edgeR0 = Math.floor(heroY + 0.02) - 1, edgeDa = (-rot) - angOf(K);   // holding a lean toward an open edge keeps you teetering (up to ~90°) instead of the settle snapping you back
+  const edgeHold = ptr !== null && mode === 'ground' && (
+    (edgeDa > 0.001 && canEnter(K + 1) && !solid(K + 1, edgeR0)) ||
+    (edgeDa < -0.001 && canEnter(K - 1) && !solid(K - 1, edgeR0)));
   const driving = keys['arrowleft'] || keys['a'] || keys['arrowright'] || keys['d']
-    || (ptr !== null && (now - lastDrag) < 110) || Math.abs(rotTarget - rot) > 0.02 || tapT > 0;   // an active tap-step holds the lean so it can complete a step-up (settle would otherwise cancel it)
+    || (ptr !== null && (now - lastDrag) < 110) || Math.abs(rotTarget - rot) > 0.02 || tapT > 0   // an active tap-step holds the lean so it can complete a step-up (settle would otherwise cancel it)
+    || edgeHold;
   if(carrier){
     // on a mount: arrow/A/D nudges the dismount accumulator instead of rolling the world
     if(keys['arrowleft'] || keys['a']) rideSteer += 5.5 * dt * (flipControls ? -1 : 1);
@@ -799,11 +810,11 @@ function frame(now){
     omega = 0;
     const hL = angOf(K) - midOf(K - 1), hR = midOf(K) - angOf(K);
     const da = (-rot) - angOf(K);
-    const g = da >= 0 ? Math.min(0.5, da / (2 * hR)) : Math.max(-0.5, da / (2 * hL));
+    const g = da >= 0 ? Math.min(1, da / (2 * hR)) : Math.max(-1, da / (2 * hL));   // allow up to a full 90° edge-lean so a released teeter rocks back smoothly (was clamped at 0.5 -> snapped)
     if(Math.abs(g) > 1e-4){
       const dir = -Math.sign(g);
       if(Math.sign(tip) !== dir) tip = 0;
-      tip += dir * TOPPLE_A * (0.35 + (0.5 - Math.abs(g))) * dt;
+      tip += dir * TOPPLE_A * Math.max(0.2, 0.85 - Math.abs(g)) * dt;   // always topple toward upright (the old 0.85-|g| term went negative past ~85° and pushed the cube OUT)
       let ng = g + tip * dt;
       if(Math.sign(ng) !== Math.sign(g) || ng === 0){ ng = 0; tip = 0; squash = Math.max(squash, 0.12); }
       rot = -(angOf(K) + ng * (ng >= 0 ? 2 * hR : 2 * hL));
