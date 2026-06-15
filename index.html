@@ -232,11 +232,14 @@ function loadCustom(){
   if(!data) return null;
   const lines = (data.code || '').replace(/\r/g, '').split('\n').filter(l => l.length);
   let body = /^ROOM/.test(lines[0]) ? lines.slice(1) : lines;
+  let codeDiv = null;                                                    // a DIVIDERS line in the code carries the editor's band boundaries (self-contained export)
+  const dvi = body.findIndex(l => /^DIVIDERS/i.test(l.trim()));
+  if(dvi >= 0){ codeDiv = body[dvi].replace(/DIVIDERS/i, '').trim().split(/[,\s]+/).map(Number).filter(n => n > 0); body = body.slice(0, dvi).concat(body.slice(dvi + 1)); }
   let stickLines = [];
   const si = body.findIndex(l => l.trim() === 'STICK');
   if(si >= 0){ stickLines = body.slice(si + 1); body = body.slice(0, si); }   // per-face sticky section
   if(!body.length) return null;
-  return { body, rows: body.length, BASE: 2, dividers: (data.dividers || []).filter(d => d > 0).sort((a, b) => a - b), stickLines };
+  return { body, rows: body.length, BASE: 2, dividers: ((codeDiv && codeDiv.length ? codeDiv : data.dividers) || []).filter(d => d > 0).sort((a, b) => a - b), stickLines };
 }
 function mkMon(c, wr, type, vert){ return { row: wr, c, dir: 1, speed: 1.6, state: 'alive', thawT: 0, grp: null, bodyMat: null, type, vert: !!vert, phase: 'happy', rideT: 0, lastCell: c, faces: null }; }
 function populateCustom(){
@@ -244,7 +247,7 @@ function populateCustom(){
   const { body, rows, BASE, dividers } = CUSTOM;
   const bandFloors = [0]; for(const d of dividers) if(d > 0 && d < rows) bandFloors.push(d);   // editor floor row of each level band
   const floorForRow = lr => { let f = 0; for(const d of bandFloors) if(d <= lr) f = d; return f; };
-  const spawn = {};
+  const spawnList = [];   // each S = its own checkpoint band, so "what level am I on" is divider-independent
   for(let lr = 0; lr < rows; lr++){
     const line = body[(rows - 1) - lr] || '';     // body[0] = top row; local row 0 = bottom
     const wr = lr + BASE;
@@ -252,7 +255,7 @@ function populateCustom(){
       const ch = line[c] || '.', k = Kk(c, wr);
       switch(ch){
         case '#': solidSet.add(k); break;
-        case 'S': solidSet.add(k); spawn[floorForRow(lr)] = [c, wr + 1]; break;
+        case 'S': solidSet.add(k); spawnList.push({ entry: [c, wr + 1] }); break;
         case 'O': break;                            // open hole — fall through
         case 'D': doorSet.add(k); break;
         case 'C': solidSet.add(k); crackedSet.add(k); break;
@@ -279,15 +282,19 @@ function populateCustom(){
     const c = +mm[1], wr = (+mm[2]) + BASE, f = mm[3];
     for(const F of f){ if('BLROIT'.includes(F)) faceSet.add(Kk(c, wr) + ',' + F); }   // T = a sticky top you can wrap onto
   }
-  const floorsDesc = bandFloors.slice().sort((a, b) => b - a);   // top band first
-  CUSTOM.bands = floorsDesc.map(fEd => {
-    let e = spawn[fEd];
-    if(!e){ let sc = 0; for(let c = 0; c < N; c++) if(solidSet.has(Kk(c, fEd + BASE))){ sc = c; break; } e = [sc, fEd + BASE + 1]; }
-    return { floorWorld: fEd + BASE, entry: e };
-  });
+  if(spawnList.length){
+    CUSTOM.bands = spawnList.slice().sort((a, b) => b.entry[1] - a.entry[1])   // topmost spawn = band 0
+      .map(s => ({ floorWorld: s.entry[1] - 1, entry: s.entry }));
+  } else {
+    const floorsDesc = bandFloors.slice().sort((a, b) => b - a);   // no spawns painted: fall back to divider floors
+    CUSTOM.bands = floorsDesc.map(fEd => {
+      let sc = 0; for(let c = 0; c < N; c++) if(solidSet.has(Kk(c, fEd + BASE))){ sc = c; break; }
+      return { floorWorld: fEd + BASE, entry: [sc, fEd + BASE + 1] };
+    });
+  }
   CUSTOM.winY = BASE;   // fall below the bottom floor = you reached the bottom
 }
-function customBand(y){ const b = CUSTOM.bands; let i = 0; while(i < b.length - 1 && y <= b[i].floorWorld) i++; return i; }
+function customBand(y){ const b = CUSTOM.bands; let i = 0; while(i < b.length - 1 && y <= b[i + 1].entry[1] + 0.5) i++; return i; }   // advance to a band only once you've DESCENDED to its spawn — a killer block from the level above can't drag your checkpoint up
 function buildWorld(){
   solidSet = new Set(); pads = new Set(); sticky = new Set(); wallSticky = new Set(); faceSet = new Set(); sandSet = new Set();
   sandTimers = new Map(); spikes = new Set(); cspikes = new Set(); coinsSet = new Set(); keySet = new Set(); chestSet = new Set(); doorSet = new Set();
@@ -845,7 +852,11 @@ function frame(now){
           if(Math.abs(rideSteer) >= 1){
             const sstep = rideSteer > 0 ? 1 : -1;
             rideSteer = 0;
-            if(canEnter(K + sstep)){ justLeft = carrier; jlTimer = 0.9; K += sstep; carrier = null; rideFrac = null; mode = 'air'; vy = -8; }
+            const nc = mod(K + sstep), hr = Math.floor(heroY + 0.02);   // hr = the hero's feet row (= the mount's row + 1)
+            if(solid(nc, hr - 1) && !solid(nc, hr)){                    // a block LEVEL with you (next to the mount) -> ROLL onto it like rolling along two floor blocks (no hop)
+              const oc = col(); K += sstep; justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'ground'; heroY = hr; vy = 0; squash = 0.12;
+              rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;   // the view recenters with a roll, so the cube rolls off the mount onto the block
+            } else if(canEnter(K + sstep)){ justLeft = carrier; jlTimer = 0.9; K += sstep; carrier = null; rideFrac = null; mode = 'air'; vy = -8; }   // open air -> hop off
           }
           if(carrier === M){
             const cc3 = Math.round(M.c);
