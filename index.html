@@ -969,6 +969,14 @@ function frame(now){
             const nc = mod(K + sstep), hr = Math.floor(heroY + 0.02), F = sstep > 0 ? 'L' : 'R';   // hr = the hero's feet row (= the mount's row + 1)
             if(solid(nc, hr) && faced(nc, hr, F) && !solid(col(), hr)){   // a STICKY wall right beside you -> cling onto it, exactly like rolling/falling into a sticky wall from the ground
               justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; clAttach(nc, hr, F, -sstep);   // -sstep: keep pushing into the wall => climb UP
+            } else if(solid(nc, hr) && !solid(nc, hr + 1) && !solid(col(), hr + 1) && !spikes.has(Kk(nc, hr + 1))){   // a block ONE STEP UP beside the mount -> climb/vault onto it (like the ground step-up)
+              const oc = col(); justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'ground'; K += sstep; heroY = hr + 1; vy = 0;
+              rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
+              climbA = CLIMB_DUR;
+              climbPivot = [(P[oc][0] + P[mod(K)][0]) / 2 - 2.5, hr + 1, (P[oc][1] + P[mod(K)][1]) / 2 - 2.5];
+              climbFrom = [P[oc][0] - 2.5, hr + 0.5, P[oc][1] - 2.5];
+              climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[mod(K)][0] - P[oc][0], 0, P[mod(K)][1] - P[oc][1])).normalize();
+              tip = 0;
             } else if(solid(nc, hr - 1) && !solid(nc, hr)){              // a block LEVEL with you (next to the mount) -> ROLL onto it like rolling along two floor blocks (no hop)
               const oc = col(); K += sstep; justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'ground'; heroY = hr; vy = 0; squash = 0.12;
               rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;   // the view recenters with a roll, so the cube rolls off the mount onto the block
@@ -1058,7 +1066,7 @@ function frame(now){
       else { if(padArmKey !== supKey){ padArmKey = supKey; padArmT = 0.09; } padArmT -= dt;
         if(padArmT <= 0){ vy = launch; mode = 'air'; squash = 0; padCombo = 1; padArmKey = null; showMsg("sproing."); } }  // fresh -> wait a beat (flat), then launch
     }
-    else if(spikes.has(Kk(col(), sup + 1))){ die("the spikes."); }
+    else if(spikes.has(Kk(col(), sup + 1))){ const _hR = midOf(K) - angOf(K), _hL = angOf(K) - midOf(K - 1), _da = (-rot) - angOf(K), _ln = _da >= 0 ? _da / (2 * _hR) : _da / (2 * _hL); if(Math.abs(_ln) < 0.32) die("the spikes."); }   // only die once the cube is actually OVER the spike column, not at the mid-roll boundary
     else if(doorSet.has(supKey)){
       if(keyCount > 0){
         doorSet.delete(supKey); keyCount--; hud();
