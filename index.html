@@ -25,7 +25,7 @@
 <div id="flip">&#8644; flip</div>
 <div id="bigmsg"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>window.TOWER_LEVEL = {"code":"ROOM rows=64 width=20\n....................\n................o...\n................#...\nS....o..K...o......#\n#...........#.......\n#.o....#P#.##.##..##\n#.#D#^^...###.#...m#\n#^.....######P#^P###\n.#.......o#......X..\n..SN................\n..............##....\n..^^###P.#..#N.o###.\n...###.#...#o.K.....\n..####.#o#.#........\nC#####.#.#o#..x.###P\nO####v##^####P######\n......######vo..X...\n.....o#vvvv.........\n....#.#.....o.......\n...#v.#K..........X.\nSN#..o##....^...NNN#\nK.....##...##CP#...#\n@.#..Y##...#o..#...#\n###P^####WP#.@.#^^^#\n......^##D###P##..#.\n...#.K...o####....#.\n...###v#..#..#....#.\n.o.#......####....#.\n...##.....#..#....#.\n...##..#.###.#....#.\n.x..#..#.....#....#.\n#########D####....SP\n......#.#..........#\n......#.#.#o.o....K#\n......#.#...#...####\n......#.#..ov#P#...#\n......#.#.#...v##..#\n......#.#.#...o.#..#\n......#.....@...#..#\n......###D#########S\n#......#..#.....####\n##.....#..#.#v^K....\n#......#..#....##...\n#.##...#..#o......##\n####...#..#.........\n#.##.#.#..#........o\n#x.#...#..#.........\n#######S..########DP\n..K#.o.####....#....\n..##......#....#....\n####.o...o#....#..##\n#.##......#....#..##\n#v.#......#....#..#.\n...#.#o.o.#....#..##\n..####..x.#....#....\n######P#S##....###D#\n##..^......^.......#\n...o#......#........\n.K..#......#......#.\nv#..#......#......#.\n.#..#......#......##\n.#.o#......#...#####\n.##.#......#.xo.....\n#####......S##P####D\nSTICK\n11,49 L\n11,50 L\n11,51 L\n10,57 I\n11,57 B\n16,61 BLT\n12,47 R\n7,56 B\n8,56 B\n9,56 B\n7,42 R\n7,43 R","dividers":[1,9,17,25,33,44,55]};</script>
+<script>window.TOWER_LEVEL = {"code":"ROOM rows=64 width=20\n....................\n................o...\n................#...\nS....o..K...o......#\n#...........#.......\n#.o....#P#.##.##..##\n#.#D#^^...###.#...m#\n#^.....######P#^P###\n.#.......o#......X..\n..SN................\n..............##....\n..^^###P.#..#N.o###.\n...###.#...#o.K.....\n..####.#o#.#........\nC#####.#.#o#..x.###P\nO####v##^####P######\n......######vo..X...\n.....o#vvvv.........\n....#.#.....o.......\n...#v.#K..........X.\nSN#..o##....^...NNN#\nK.....##...##CP#...#\n@.#..Y##...#o..#...#\n###P^####WP#.@.#^^^#\n......^##D###P##..#.\n...#.K...o####....#.\n...###v#..#..#....#.\n.o.#......####....#.\n...##.....#..#....#.\n...##..#.###.#....#.\n.x..#..#.....#....#.\n#########D####....SP\n......#.#..........#\n......#.#.#o.o....K#\n......#.#...#...####\n......#.#..ov#P#...#\n......#.#.#...v##..#\n......#.#.#...o.#..#\n......#.....@...#..#\n......###D#########S\n#......#..#.....####\n##.....#..#.#v^K....\n#......#..#....##...\n#.##...#..#o......##\n####...#..#.........\n#.##.#.#..#........o\n#x.#...#..#.........\n#######S..########DP\n..K#.o.####....#....\n..##......#....#....\n####.o...o#....#..##\n#.##......#....#..##\n#v.#......#....#..#.\n...#.#o.o.#....#..##\n..####..x.#....#....\n######P#S##....###D#\n##..^......^.......#\n...o#......#........\n.K..#......#......#.\nv#..#......#......#.\n.#..#......#......##\n.#.o#......#...#####\n.##.#......#.xo.....\n#####......S##P####D\nDIVIDERS 8,16,24,32,40,48,56\nSTICK\n11,49 L\n11,50 L\n11,51 L\n10,57 I\n11,57 B\n16,61 BLT\n12,47 R\n7,56 B\n8,56 B\n9,56 B\n7,42 R\n7,43 R","dividers":[8,16,24,32,40,48,56]};</script>
 <script>
 // ---------------------------------------------------------------------------
 // playground v3: the press is parked. the puzzle layer arrives —
@@ -635,12 +635,15 @@ function setRot(target){
 
 // --- input ---
 let ptr = null, lastX = 0, lastT = 0, dragVel = 0, lastDrag = -1e9;
+let downX = 0, downT = 0, tapMoved = false;                            // single tap/click = step exactly one block (fine control alongside the free slide)
+let tapT = 0, tapKind = '', tapTargetRot = 0, tapSteer = 0, tapMark = 0;
 const SENS = 0.0045;   // drag sensitivity
 let flipControls = false; try { flipControls = localStorage.getItem('tcFlip') === '1'; } catch(e){}   // on-screen toggle: invert ALL input so it feels like rotating the character, not the tower
-window.addEventListener('pointerdown', e => { if(e.target.id === 'redo' || e.target.id === 'flip') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
+window.addEventListener('pointerdown', e => { if(e.target.id === 'redo' || e.target.id === 'flip') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); downX = e.clientX; downT = lastT; tapMoved = false; tapT = 0; dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
 window.addEventListener('pointermove', e => {
   if(e.pointerId !== ptr) return;
   const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(8, now - lastT);
+  if(Math.abs(e.clientX - downX) > 10) tapMoved = true;   // moved past the dead-zone => it's a drag, not a tap
   if(Math.abs(dx) > 1.5) lastDrag = now;
   if(carrier){ rideSteer += dx * SENS * 1.5 * (flipControls ? -1 : 1); }
   else rotTarget += dx * SENS * (flipControls ? -1 : 1) * (mode === 'cling' && !clTang(clFace) ? -1 : 1);   // flip toggle inverts all input; cling: ceiling/top crawl matches the floor, only the vertical WALL climb is flipped
@@ -649,7 +652,20 @@ window.addEventListener('pointermove', e => {
   dragVel = (dx * SENS) / (dt / 1000);
   lastX = e.clientX; lastT = now;
 });
-function release(e){ if(e.pointerId === ptr){ ptr = null; omega = Math.max(-1.6, Math.min(1.6, dragVel)); } }
+function release(e){ if(e.pointerId === ptr){ ptr = null; omega = Math.max(-1.6, Math.min(1.6, dragVel));
+  if(!tapMoved && (performance.now() - downT) < 250){ omega = 0; tapStep(downX); }   // quick press with ~no drag => one-block step toward the tapped side
+} }
+function tapStep(x){
+  if(mode === 'dead' || climbA > 0 || clAnim > 0 || clDropT > 0) return;
+  const pushSign = ((x > innerWidth / 2) ? 1 : -1) * (flipControls ? -1 : 1);   // tap RIGHT/LEFT half, carrying the same flip the slide uses
+  if(carrier){ rideSteer = pushSign * 1.1; return; }                            // on a mount: commit one dismount step in that direction
+  if(mode === 'cling' && clFace && !clTang(clFace)){                            // on a vertical wall: climb exactly one block
+    tapKind = 'cling'; tapSteer = -pushSign * 0.6; tapMark = clT; tapT = 0.7; return;   // tapMark = starting climb height; stop after ~one block of clT
+  }
+  if(mode === 'ground' || (mode === 'cling' && clTang(clFace))){                // ground OR ceiling/top crawl: roll exactly one column
+    tapKind = 'ground'; tapTargetRot = -angOf(K - pushSign); tapMark = K; tapT = 0.3; return;
+  }
+}
 window.addEventListener('pointerup', release);
 window.addEventListener('pointercancel', release);
 addEventListener('contextmenu', e => e.preventDefault());
@@ -737,7 +753,7 @@ function frame(now){
   }
 
   const driving = keys['arrowleft'] || keys['a'] || keys['arrowright'] || keys['d']
-    || (ptr !== null && (now - lastDrag) < 110) || Math.abs(rotTarget - rot) > 0.02;
+    || (ptr !== null && (now - lastDrag) < 110) || Math.abs(rotTarget - rot) > 0.02 || tapT > 0;   // an active tap-step holds the lean so it can complete a step-up (settle would otherwise cancel it)
   if(carrier){
     // on a mount: arrow/A/D nudges the dismount accumulator instead of rolling the world
     if(keys['arrowleft'] || keys['a']) rideSteer += 5.5 * dt * (flipControls ? -1 : 1);
@@ -757,6 +773,16 @@ function frame(now){
   const cInput = keys['arrowleft'] || keys['a'] || keys['arrowright'] || keys['d'] || ptr !== null;
   const clFresh = cInput && clReleaseT > 0.08;   // #4: a press that began after >0.08s of no input (robust against brief input gaps) -> only this lets go at a dead end
   if(cInput) clReleaseT = 0; else clReleaseT += dt;
+  if(tapT > 0){                                  // single-tap one-block step: drive toward the goal each frame until it commits, then stop (so it's exactly one block, not a continuous walk)
+    if(mode === 'dead'){ tapT = 0; }
+    else if(tapKind === 'ground'){
+      if(!(mode === 'ground' || (mode === 'cling' && clTang(clFace))) || K !== tapMark) tapT = 0;   // rolled one column (or left a column-driven mode)
+      else { tapT -= dt; rotTarget = tapTargetRot; }
+    } else {
+      if(mode !== 'cling' || !clCell || clTang(clFace) || Math.abs(clT - tapMark) >= 0.9) tapT = 0;   // climbed ~one block (the settle eases the last sliver), or wrapped / detached
+      else { tapT -= dt; rotTarget = rot + tapSteer; }
+    }
+  }
   // soft speed cap: rot chases the target, velocity saturates instead of snapping.
   // SKIP entirely while riding a mount — the ride block owns rot and K; setRot() here would
   // nudge K and fight the carry, spinning the cube.
