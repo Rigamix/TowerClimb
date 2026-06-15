@@ -139,6 +139,7 @@ function artDecorate(){   // (ART FORK) interactables: NO outline (removed), jus
   for(const it of chestMeshes) it.m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });
   for(const it of keyMeshes) it.m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });
   for(const M of MONSTERS){ if(M.grp) M.grp.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } }); }
+  for(const it of spikeMeshes) it.m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });   // (ART FORK) spikes cast no drop shadow
 }
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xefe6d2);   // (ART FORK) warm cream backdrop, closer to the concept
