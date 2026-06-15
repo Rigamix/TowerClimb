@@ -852,8 +852,10 @@ function frame(now){
           if(Math.abs(rideSteer) >= 1){
             const sstep = rideSteer > 0 ? 1 : -1;
             rideSteer = 0;
-            const nc = mod(K + sstep), hr = Math.floor(heroY + 0.02);   // hr = the hero's feet row (= the mount's row + 1)
-            if(solid(nc, hr - 1) && !solid(nc, hr)){                    // a block LEVEL with you (next to the mount) -> ROLL onto it like rolling along two floor blocks (no hop)
+            const nc = mod(K + sstep), hr = Math.floor(heroY + 0.02), F = sstep > 0 ? 'L' : 'R';   // hr = the hero's feet row (= the mount's row + 1)
+            if(solid(nc, hr) && faced(nc, hr, F) && !solid(col(), hr)){   // a STICKY wall right beside you -> cling onto it, exactly like rolling/falling into a sticky wall from the ground
+              justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; clAttach(nc, hr, F, -sstep);   // -sstep: keep pushing into the wall => climb UP
+            } else if(solid(nc, hr - 1) && !solid(nc, hr)){              // a block LEVEL with you (next to the mount) -> ROLL onto it like rolling along two floor blocks (no hop)
               const oc = col(); K += sstep; justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'ground'; heroY = hr; vy = 0; squash = 0.12;
               rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;   // the view recenters with a roll, so the cube rolls off the mount onto the block
             } else if(canEnter(K + sstep)){ justLeft = carrier; jlTimer = 0.9; K += sstep; carrier = null; rideFrac = null; mode = 'air'; vy = -8; }   // open air -> hop off
