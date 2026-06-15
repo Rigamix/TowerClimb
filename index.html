@@ -87,18 +87,78 @@ canvas.addEventListener('webglcontextlost', e => {
   if(m0) m0.textContent = "graphics context lost. reload the page.";
 });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;                 // (ART FORK) "sun" shadows
+renderer.shadowMap.type = THREE.BasicShadowMap;    // crispest possible edge (aliasing accepted)
+// (ART FORK) FLAT shading: route every Lambert material through Phong (per-fragment shadows) and override the
+// fragment output so each surface is its PURE BASE COLOR where lit and PURE BLACK where the sun's shadow falls
+// — no light-angle shading, no distance falloff. getShadowMask() is 1 (lit) / 0 (shadowed), hard with BasicShadowMap.
+THREE.MeshLambertMaterial = THREE.MeshPhongMaterial;
+THREE.MeshPhongMaterial.prototype.onBeforeCompile = function(shader){
+  // pass the WORLD normal so each face gets a flat tone by orientation (top brightest, two side tones)
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vWNArt;\nvarying float vYArt;')
+    .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n\tvWNArt = objectNormal;')   // OBJECT-space normal: each face's tone is fixed and never shifts as the tower rotates
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvYArt = ( modelMatrix * vec4( transformed, 1.0 ) ).y;');   // world height for the ramp
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vWNArt;\nvarying float vYArt;\nvec3 a_rgb2hsv(vec3 c){ vec4 K=vec4(0.0,-1.0/3.0,2.0/3.0,-1.0); vec4 p=mix(vec4(c.bg,K.wz),vec4(c.gb,K.xy),step(c.b,c.g)); vec4 q=mix(vec4(p.xyw,c.r),vec4(c.r,p.yzx),step(p.x,c.r)); float d=q.x-min(q.w,q.y); float e=1.0e-10; return vec3(abs(q.z+(q.w-q.y)/(6.0*d+e)),d/(q.x+e),q.x); }\nvec3 a_hsv2rgb(vec3 c){ vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0); vec3 p=abs(fract(c.xxx+K.xyz)*6.0-K.www); return c.z*mix(K.xxx,clamp(p-K.xxx,0.0,1.0),c.y); }\nfloat a_b2(vec2 a){ a=floor(a); return fract(a.x*0.5 + a.y*a.y*0.75); }\nfloat a_b4(vec2 a){ return a_b2(0.5*a)*0.25 + a_b2(a); }\nfloat artDither(vec2 a){ return a_b4(0.5*a)*0.25 + a_b2(a); }')
+    .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>')   // Phong omits getShadowMask() — pull it in
+    .replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+      'gl_FragColor = vec4( diffuseColor.rgb * getShadowMask(), diffuseColor.a );');   // items / special blocks: flat base colour + shadow (no tint -> coins & keys stay gold)
+};
+function heroCompile(shader){   // (ART FORK) hero = single colour with only a SUBTLE per-face variation, sharp black shadow
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vHN;\nvarying vec3 vHP;')
+    .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n\tvHN = objectNormal;\n\tvHP = position;');   // object normal + local position (unit cube -0.5..0.5) for the INSET edge outline
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vHN;\nvarying vec3 vHP;\nvec3 h_rgb2hsv(vec3 c){ vec4 K=vec4(0.0,-1.0/3.0,2.0/3.0,-1.0); vec4 p=mix(vec4(c.bg,K.wz),vec4(c.gb,K.xy),step(c.b,c.g)); vec4 q=mix(vec4(p.xyw,c.r),vec4(c.r,p.yzx),step(p.x,c.r)); float d=q.x-min(q.w,q.y); float e=1.0e-10; return vec3(abs(q.z+(q.w-q.y)/(6.0*d+e)),d/(q.x+e),q.x); }\nvec3 h_hsv2rgb(vec3 c){ vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0); vec3 p=abs(fract(c.xxx+K.xyz)*6.0-K.www); return c.z*mix(K.xxx,clamp(p-K.xxx,0.0,1.0),c.y); }')
+    .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>')
+    .replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+      'float hUp = normalize(vHN).y; vec3 hHSV = h_rgb2hsv(diffuseColor.rgb); if(hUp>0.55){ hHSV.z=min(1.0,hHSV.z*1.04); } else { hHSV.x=fract(hHSV.x + vHN.x*0.022 + vHN.z*0.013); hHSV.z*=0.94; } vec3 hCol = h_hsv2rgb(hHSV);\n'
+    + ' vec3 hAP = abs(vHP); vec3 hAN = abs(normalize(vHN));\n'
+    + ' float hIP = hAN.x>0.5 ? max(hAP.y,hAP.z) : ( hAN.y>0.5 ? max(hAP.x,hAP.z) : max(hAP.x,hAP.y) );\n'   // in-plane distance from face centre
+    + ' if( 0.5 - hIP < 0.05 ) hCol = vec3(0.11,0.45,0.92);\n'   // INSET saturated-blue outline band, inside the cube -> never pokes into the floor
+    + ' float hFog = smoothstep(11.0,33.0,length(vViewPosition)); hCol = mix(hCol, vec3(0.937,0.902,0.824), hFog);\n'   // fog the lit colour, then x shadow so the shadow stays pitch black
+    + ' gl_FragColor = vec4( hCol * getShadowMask(), diffuseColor.a );');
+}
+function blockCompile(shader){   // (ART FORK) DEFAULT blocks: top = base colour, side faces = a fixed #f781a9 (own shader so items aren't affected)
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vBN;\nvarying float vBY;')
+    .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n\tvBN = objectNormal;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvBY = ( modelMatrix * vec4( transformed, 1.0 ) ).y;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vBN;\nvarying float vBY;\nvec3 b_rgb2hsv(vec3 c){ vec4 K=vec4(0.0,-1.0/3.0,2.0/3.0,-1.0); vec4 p=mix(vec4(c.bg,K.wz),vec4(c.gb,K.xy),step(c.b,c.g)); vec4 q=mix(vec4(p.xyw,c.r),vec4(c.r,p.yzx),step(p.x,c.r)); float d=q.x-min(q.w,q.y); float e=1.0e-10; return vec3(abs(q.z+(q.w-q.y)/(6.0*d+e)),d/(q.x+e),q.x); }\nvec3 b_hsv2rgb(vec3 c){ vec4 K=vec4(1.0,2.0/3.0,1.0/3.0,3.0); vec3 p=abs(fract(c.xxx+K.xyz)*6.0-K.www); return c.z*mix(K.xxx,clamp(p-K.xxx,0.0,1.0),c.y); }')
+    .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>')
+    .replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+      'float bUp = normalize(vBN).y; float bH = clamp((vBY-2.0)/60.0,0.0,1.0); vec3 bSrc = bUp>0.55 ? diffuseColor.rgb : vec3(0.969,0.506,0.663); vec3 bHSV = b_rgb2hsv(bSrc); bHSV.x = fract(bHSV.x - bH*0.05); if(bUp>0.55){ bHSV.z = min(1.0, bHSV.z*1.08); } else if((vBN.x+vBN.z) > 0.0){ bHSV.z *= 0.82; } vec3 bCol = b_hsv2rgb(bHSV); float bFog = smoothstep(11.0,33.0,length(vViewPosition)); bCol = mix(bCol, vec3(0.937,0.902,0.824), bFog); gl_FragColor = vec4( bCol * getShadowMask(), diffuseColor.a );');   // 2 side tones; fog applied to LIT colour then x shadow -> shadow stays pitch black
+}
+// (ART FORK) interactable items: NO drop shadow
+const artOutMat = new THREE.LineBasicMaterial({ color: 0x241f14 });
+function artEdge(mesh){ if(mesh.userData._oe || !mesh.geometry) return; mesh.userData._oe = 1; mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), artOutMat)); }
+function artDecorate(){   // (ART FORK) interactables: NO outline (removed), just strip their drop shadows
+  for(const it of coinMeshes) it.m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });
+  for(const it of chestMeshes) it.m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });
+  for(const it of keyMeshes) it.m.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });
+  for(const M of MONSTERS){ if(M.grp) M.grp.traverse(o => { if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } }); }
+}
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x10141d);
-scene.fog = new THREE.Fog(0x10141d, 9, 30);
+scene.background = new THREE.Color(0xefe6d2);   // (ART FORK) warm cream backdrop, closer to the concept
+scene.fog = new THREE.Fog(0xefe6d2, 11, 33);   // (ART FORK) depth haze fading to the background colour (about half-strength)
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 100);
-scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x2a2418, 0.95));
-const sun = new THREE.DirectionalLight(0xffe8c0, 0.7); sun.position.set(3, 8, 6); scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x2a2418, 0.42));   // (ART FORK) lower ambient fill so the sun's shadows read dark
+const sun = new THREE.DirectionalLight(0xffe8c0, 1.05); sun.position.set(6, 12, 8); scene.add(sun);
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);   // very high res = crispest shadow shape
+sun.shadow.bias = -0.0006;
+sun.shadow.radius = 1;        // tight edge (sharp)
+sun.shadow.normalBias = 0.03; // guard against acne from the camera-grazing sun
+{ const sc = sun.shadow.camera; sc.left = -16; sc.right = 16; sc.top = 16; sc.bottom = -16; sc.near = 1; sc.far = 70; sc.updateProjectionMatrix(); }
+scene.add(sun.target);   // aimable target (updated each frame to track the visible area -> tight, sharp frustum)
 const tower = new THREE.Group(); scene.add(tower);
 const box = new THREE.BoxGeometry(1, 1, 1);
 const plate = new THREE.BoxGeometry(0.98, 0.07, 0.98);
 const edgeGeo = new THREE.EdgesGeometry(box);
-const palette = [0x33415e, 0x3a4a6a, 0x2c3852];
-function edgeLine(c){ return new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.5 })); }
+const palette = [0xff6fa5, 0x5bc4e6, 0xf6d44a, 0x8e7bef];   // (ART FORK) one vibrant colour per TOWER SIDE (pink / teal / yellow / purple) for a readable shape
+function edgeLine(c){ const l = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: c })); l.visible = false; return l; }   // (ART FORK) outlines removed (kept as a hidden node so the .material refs elsewhere stay valid)
 const faceMat = new THREE.MeshLambertMaterial({ color: 0x14101c });
 const miniCone = new THREE.ConeGeometry(0.11, 0.28, 4);
 function setMouth(g, kind){
@@ -143,30 +203,35 @@ function attachFaces(grp, sideKind, topKind){
 const BG = new THREE.Color(0x10141d);
 const DEPTH_BANDS = 5;
 function gradeColor(base, b){
-  const t = b / (DEPTH_BANDS - 1);
-  const c = base.clone();
-  const l = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
-  c.lerp(new THREE.Color(l, l, l), t * 0.55);
-  c.lerp(BG, t * 0.45);
-  return c;
+  return base.clone();   // (ART FORK) distance grading disabled — every band keeps the flat base color
 }
 let depthReg = [];
-function regDepth(mesh, materials){
+function regDepth(){ return; }   // (ART FORK) distance grading disabled — flat colours, and frees block materials for the under-hero highlight
+function regDepthOFF(mesh, materials){
   const entries = materials.map(mt => ({ mt, graded: Array.from({ length: DEPTH_BANDS }, (_, b) => gradeColor(mt.color.clone(), b)), baseOp: mt.opacity }));
   depthReg.push({ mesh, entries, lastBand: -1 });
 }
-const hero = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0xd9a13a }));
+const hero = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0x33c2e6 }));   // (ART FORK) cyan-blue hero
 hero.scale.set(0.92, 0.92, 0.92);
-hero.add(edgeLine(0xffe8b0));
+hero.material.onBeforeCompile = heroCompile; hero.material.customProgramCacheKey = () => 'arthero'; hero.material.fog = false; hero.material.needsUpdate = true;   // (ART FORK) subtle per-face variation + manual fog
+// (ART FORK) the hero outline is drawn INSIDE the shape by heroCompile (inset edge band) — no hull, so it never pokes into the floor
 tower.add(hero);
+// (ART FORK) hero eyes — two LINE marks, billboarded to face the camera and ALWAYS drawn on top (never occluded)
+const heroEyeMat = new THREE.MeshBasicMaterial({ color: 0x000000, depthTest: false, depthWrite: false });   // black eyes, always drawn above the outline
+const heroEyeGeo = new THREE.PlaneGeometry(0.038, 0.18);
+const heroFace = new THREE.Group();
+{ const eL = new THREE.Mesh(heroEyeGeo, heroEyeMat); eL.position.set(-0.13, 0.04, 0); eL.renderOrder = 999; const eR = new THREE.Mesh(heroEyeGeo, heroEyeMat); eR.position.set(0.13, 0.04, 0); eR.renderOrder = 999; heroFace.add(eL, eR); }
+scene.add(heroFace);
+const _hw = new THREE.Vector3(), _hd = new THREE.Vector3();
 // #3: a subtle dashed guide showing where the hero will fall/land (a child of the tower so it rotates with the column)
 const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x6fc7ff, transparent: true, opacity: 0.12, dashSize: 0.28, gapSize: 0.22 }));   // #2: fainter still + only shown when the path curves sideways
 trajLine.frustumCulled = false; trajLine.visible = false; tower.add(trajLine);
 // #1: glow ONLY the top face of the block under the hero (a plate, not the whole cube)
 const glowPlate = new THREE.Mesh(plate, new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.5 }));
-glowPlate.visible = false; tower.add(glowPlate);
+glowPlate.visible = false;   // (ART FORK) overlay plate retired — the under-hero block now brightens its own colour
+const ART_WHITE = new THREE.Color(1, 1, 1); let glowMat = null;
 // death: the hero flashes red then bursts into small red cubes
-const HERO_COL = 0xd9a13a, partGeo = new THREE.BoxGeometry(0.22, 0.22, 0.22);
+const HERO_COL = 0x33c2e6, partGeo = new THREE.BoxGeometry(0.22, 0.22, 0.22);   // (ART FORK) cyan-blue hero (respawn restores this)
 const partMat1 = new THREE.MeshBasicMaterial({ color: 0xe23a3a }), partMat2 = new THREE.MeshBasicMaterial({ color: 0xff6a5a });
 let deathParts = [], deathBurstT = 0;
 function clearDeathParts(){ for(const p of deathParts) tower.remove(p.m); deathParts = []; }
@@ -362,7 +427,8 @@ function buildWorld(){
     const [c, r] = key.split(',').map(Number);
     const isSand = sandSet.has(key);
     const isCracked = crackedSet.has(key);
-    const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: isCracked ? 0x55504a : (isSand ? 0xb89a5e : palette[(c + r) % 3]) }));
+    const m = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: isCracked ? 0x55504a : (isSand ? 0xb89a5e : 0xff6f9c) }));   // (ART FORK) default blocks: ONE base colour; the shader sets top=base, sides=#f781a9
+    if(!isSand && !isCracked){ m.material.onBeforeCompile = blockCompile; m.material.customProgramCacheKey = () => 'artblock'; m.material.fog = false; }   // manual fog in-shader
     m.position.set(P[c][0] - 2.5, r + 0.5, P[c][1] - 2.5);
     const el = edgeLine(isCracked ? 0x8a7f6e : (isSand ? 0xe0c890 : 0x55688f)); m.add(el);
     const mats = [m.material, el.material];
@@ -373,7 +439,7 @@ function buildWorld(){
         m.add(cr2); mats.push(cr2.material);
       }
     }
-    if(pads.has(key)){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0xffd34d })); p.position.y = 0.5; m.add(p); mats.push(p.material); }
+    if(pads.has(key)){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0xfafe58 })); p.position.y = 0.5; m.add(p); mats.push(p.material); }   // (ART FORK) yellow-green jump pad
     // per-face sticky plates: drawn ONLY on the exact painted faces (single-sided), from the same faceSet physics reads
     for(const F of 'BLROIT'){
       if(!faceSet.has(key + ',' + F)) continue;
@@ -1386,13 +1452,18 @@ function frame(now){
   hero.visible = mode !== 'dead' || deathBurstT > 0;
   updateDeathParts(dt);
 
-  // #1/#7: subtle glow on the TOP FACE of the block under the hero (a plate, not the whole cube) — not while clinging
+  // (ART FORK) highlight the block under the hero by BRIGHTENING its own material — intrinsic, no overlay, no z-fight
   let glowC = -1, glowR = -1;
   if(mode === 'ground' || mode === 'air'){
     for(let r = Math.floor(heroY + 0.02) - 1; r >= 0 && r > heroY - 6; r--){ if(solid(col(), r)){ glowC = col(); glowR = r; break; } }
   }
-  if(glowR >= 0){ glowPlate.visible = true; glowPlate.position.set(P[glowC][0] - 2.5, glowR + 1 + 0.045, P[glowC][1] - 2.5); }
-  else glowPlate.visible = false;
+  let wantMat = null;
+  if(glowR >= 0){ const gk = Kk(glowC, glowR); for(const cb of cubeList){ if(cb.key === gk){ wantMat = cb.m.material; break; } } }
+  if(wantMat !== glowMat){
+    if(glowMat && glowMat.userData._base) glowMat.color.copy(glowMat.userData._base);
+    if(wantMat){ if(!wantMat.userData._base) wantMat.userData._base = wantMat.color.clone(); wantMat.color.copy(wantMat.userData._base).lerp(ART_WHITE, 0.4); }
+    glowMat = wantMat;
+  }
   updateTrajectory();   // #3: draw/refresh the fall guide
 
   const leadT = (mode === 'air' && vy > 2) ? Math.min(3.5, vy * 0.3) : 0;
@@ -1406,8 +1477,19 @@ function frame(now){
   const camY = camera.position.y || camFocusY + 4;
   camera.position.set(0, camY + (camFocusY + 4.2 + clCamPull * 2.2 - camLead - camY) * Math.min(1, dt * 4), camZ);
   camera.lookAt(0, camFocusY + 1.1 - camLead - clCamPull * 1.3, 0);          // tilt the gaze down a touch
+  // (ART FORK) hero eyes face the camera, just in front of the cube
+  hero.getWorldPosition(_hw); _hd.copy(camera.position).sub(_hw).normalize();
+  heroFace.position.copy(_hw).addScaledVector(_hd, 0.5); heroFace.lookAt(camera.position); heroFace.visible = hero.visible;
   if(msgT > 0){ msgT -= dt; if(msgT <= 0) msgEl.textContent = ''; }
   if(bigT > 0){ bigT -= dt; if(bigT <= 0 && bigEl) bigEl.style.opacity = '0'; }
+  // (ART FORK) the sun RIDES the camera: light sits at the camera position and aims where the camera looks, so shadows project straight from the viewer
+  sun.position.copy(camera.position);
+  sun.target.position.set(0, camFocusY + 1.1 - camLead - clCamPull * 1.3, 0);
+  sun.target.updateMatrixWorld();
+  scene.traverse(o => { if(o.isMesh && o.userData._sh === undefined){ const s = o.scale; o.castShadow = (s.x >= 0.5 && s.y >= 0.5 && s.z >= 0.5); o.receiveShadow = true; o.userData._sh = 1; } });   // big solids cast; thin plates/decals only receive
+  artDecorate();   // (ART FORK) strip drop shadows from interactables (after the shadow tagging so it wins)
+  { const bandOf = (y) => CUSTOM ? customBand(y) : roomIndex(y), myBand = bandOf(heroY);   // (ART FORK) a gated door turns GOLD only when you hold a key AND it's on YOUR level (keyhole icon stays); grey otherwise
+    for(const d of doorMeshes){ const onMyLevel = bandOf((+d.key.split(',')[1]) + 0.5) === myBand; d.m.material.color.setHex((keyCount > 0 && onMyLevel) ? 0xe8c44a : 0x252c40); } }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
