@@ -546,7 +546,8 @@ const ENTRIES = [[1, 59], [4, 53], [10, 47], [14, 36], [8, 30], [4, 23], [6, 15]
 const ROOM_NAMES = ['the deck', 'room one: the gap', 'room two: the ledge', 'room three: the shaft', 'room four: the tenant', 'room five: the cracked floor', 'room six: the band run'];
 function roomIndex(y){ let i = 0; for(const t of TOPS) if(y < t + 0.95) i++; return i; }
 const TOPPLE_A = 5.5, LEAN = 0.04, ROTMAX = 2.0, CHASE_K = 12;
-const EDGE_STEP = 0.96;   // walking off an edge / down a drop commits to the fall only near 90° of roll (1.0 = a full 90°), not at the 45° midpoint — so you can teeter over the brink while holding
+const EDGE_STEP = 0.99;   // while HOLDING, walking off an edge / down a drop commits to the fall only when you push to ~90° of roll (1.0 = a full 90°), not at the 45° midpoint — so you're in full control up to the brink
+const EDGE_BALANCE = 0.5;  // on RELEASE, gravity tips the cube the rest of the way over if it's past the balance point (45° = CoM over the pivot edge); below it, the cube rocks back upright
 let rotTarget = 0, carryFrom = 0, carryT = 0, carryDur = 0.32;
 let carrier = null, rideFrac = null, rideSteer = 0, justLeft = null;
 let jlTimer = 0;
@@ -810,9 +811,18 @@ function frame(now){
     omega = 0;
     const hL = angOf(K) - midOf(K - 1), hR = midOf(K) - angOf(K);
     const da = (-rot) - angOf(K);
-    const g = da >= 0 ? Math.min(1, da / (2 * hR)) : Math.max(-1, da / (2 * hL));   // allow up to a full 90° edge-lean so a released teeter rocks back smoothly (was clamped at 0.5 -> snapped)
-    if(Math.abs(g) > 1e-4){
-      const dir = -Math.sign(g);
+    const g = da >= 0 ? Math.min(1, da / (2 * hR)) : Math.max(-1, da / (2 * hL));   // allow up to a full 90° edge-lean so a released teeter resolves smoothly (was clamped at 0.5 -> snapped)
+    const r0e = Math.floor(heroY + 0.02) - 1;   // released while leaning toward an open edge / step-down?
+    const dropToward = g > 0 ? (canEnter(K + 1) && !solid(K + 1, r0e)) : g < 0 ? (canEnter(K - 1) && !solid(K - 1, r0e)) : false;
+    if(dropToward && Math.abs(g) >= EDGE_BALANCE){   // let go past the balance point -> gravity tips it the rest of the way over and it drops
+      const s = Math.sign(g);
+      if(Math.sign(tip) !== s) tip = 0;
+      tip += s * TOPPLE_A * 0.5 * dt;
+      let ng = g + tip * dt;
+      if(Math.abs(ng) >= 0.99){ K += s; mode = 'air'; vy = 0; tip = 0; rotTarget = rot; }   // fully over the brink -> fall (rot already reads ~upright on the drop column, so it's continuous)
+      else { rot = -(angOf(K) + ng * (ng >= 0 ? 2 * hR : 2 * hL)); rotTarget = rot; }
+    } else if(Math.abs(g) > 1e-4){
+      const dir = -Math.sign(g);   // not past balance (or no drop) -> rock back to upright
       if(Math.sign(tip) !== dir) tip = 0;
       tip += dir * TOPPLE_A * Math.max(0.2, 0.85 - Math.abs(g)) * dt;   // always topple toward upright (the old 0.85-|g| term went negative past ~85° and pushed the cube OUT)
       let ng = g + tip * dt;
@@ -1354,7 +1364,7 @@ function frame(now){
   const hL2 = angOf(K) - midOf(K - 1), hR2 = midOf(K) - angOf(K);
   const erot = rot + rotLag;            // the angle actually shown this frame
   const da2 = (-erot) - angOf(K);
-  const g2 = (carryT > 0 || carrier) ? 0 : (da2 >= 0 ? Math.min(0.5, da2 / (2 * hR2)) : Math.max(-0.5, da2 / (2 * hL2)));
+  const g2 = (carryT > 0 || carrier) ? 0 : (da2 >= 0 ? Math.min(1, da2 / (2 * hR2)) : Math.max(-1, da2 / (2 * hL2)));   // visual roll follows clear to 90° at an edge (was clamped at 45° -> froze, then the physics snapped past it)
   const sgn = g2 >= 0 ? 1 : -1;
   const c0 = (carrier && rideFrac !== null) ? Pat(rideFrac) : P[col()], c1 = P[mod(K + sgn)];
   const d3 = new THREE.Vector3(c1[0] - c0[0], 0, c1[1] - c0[1]);
