@@ -11,6 +11,8 @@
   #hint{position:fixed;left:50%;top:18px;transform:translateX(-50%);color:#6b7a99;font-size:12px;pointer-events:none;}
   #coins{position:fixed;top:14px;right:14px;color:#ffd34d;font-size:14px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:7px 12px;pointer-events:none;}
   #redo{position:fixed;bottom:24px;right:14px;color:#cfe0ff;font-size:13px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:8px 13px;cursor:pointer;}
+  #flip{position:fixed;bottom:24px;left:14px;color:#cfe0ff;font-size:13px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:8px 13px;cursor:pointer;}
+  #flip.on{color:#ffd34d;border-color:#ffd34d;background:#3a3320aa;}
 </style>
 </head>
 <body>
@@ -19,8 +21,9 @@
 <div id="msg"></div>
 <div id="coins">&#9670; 0</div>
 <div id="redo">&#8635; room</div>
+<div id="flip">&#8644; flip</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>window.TOWER_LEVEL = {"code":"ROOM rows=64 width=20\n....................\n................o...\n................#...\nS....o..K...o......#\n#...........#.......\n#.o....#P#.##.##..##\n#.#D#^^...###.#...m#\n#^.....######P#^P###\n.#.......o#......X..\n..SN................\n..............##....\n..^^###P.#..#N.o###.\n...###.#.#.#o.K.....\n..####.#o#.#........\nC#####.#.#o##.x.###P\nO######.^####P######\n..#...#.....#o..X...\n..#...#.....v.......\n..#...#.....o.......\n..#...#.....o.....X.\n#S#...#.....^...NNN#\n..#...#....##CP#...#\n..#...#....#o.##...#\n###...###.P..@##^^^D\n...#.#^##.###P....#.\n...#.K...o####....#.\n...###v#..#..#....#.\n.o.#......####....#.\n...##.....#..#....#.\n...##..#.###.#....#.\n.x..#..#.....#....#.\n#########D####....SP\n......#.#..........#\n......#.#.#o.o....K#\n......#.#...#...####\n......#.#..ov#P#...#\n......#.#.#...v##..#\n......#.#.#...o.#..#\n......#.....@...#..#\n......###D#########S\n#......#..#.....####\n##.....#..#.#v^K....\n#......#..#....##...\n#.##...#..#o......##\n####...#..#.........\n#.##.#.#..#........o\n#x.#...#..#.........\n#######S..########DP\n..K#.o.####....#....\n..##......#....#....\n####.o...o#....#..##\n#.##......#....#..##\n#v.#......#....#..#.\n...#.#o.o.#....#..##\n..####..x.#....#....\n######P#S##....###D#\n##..^......^.......#\n...o#......#........\n.K..#......#......#.\nv#..#......#......#.\n.#..#......#......##\n.#.o#......#...#####\n.##.#......#.xo.....\n#####......S##P####D\nSTICK\n9,50 L\n9,51 L\n9,52 L\n11,49 L\n11,50 L\n11,51 L\n10,57 I\n11,57 B\n16,61 BLT\n12,46 R\n12,47 R\n7,56 B\n8,56 B\n9,56 B","dividers":[4,12,20,28,38,48,57]};</script>
+<script>window.TOWER_LEVEL = {"code":"ROOM rows=64 width=20\n....................\n................o...\n................#...\nS....o..K...o......#\n#...........#.......\n#.o....#P#.##.##..##\n#.#D#^^...###.#...m#\n#^.....######P#^P###\n.#.......o#......X..\n..SN................\n..............##....\n..^^###P.#..#N.o###.\n...###.#.#.#o.K.....\n..####.#o#.#........\nC#####.#.#o##.x.###P\nO######.^####P######\n..#...#.....#o..X...\n..#...#.....v.......\n..#...#.....o.......\n..#...#.....o.....X.\n#S#...#.....^...NNN#\n..#...#....##CP#...#\n..#...#....#o.##...#\n###...###.P..@##^^^D\n...#.#^##.###P....#.\n...#.K...o####....#.\n...###v#..#..#....#.\n.o.#......####....#.\n...##.....#..#....#.\n...##..#.###.#....#.\n.x..#..#.....#....#.\n#########D####....SP\n......#.#..........#\n......#.#.#o.o....K#\n......#.#...#...####\n......#.#..ov#P#...#\n......#.#.#...v##..#\n......#.#.#...o.#..#\n......#.....@...#..#\n......###D#########S\n#......#..#.....####\n##.....#..#.#v^K....\n#......#..#....##...\n#.##...#..#o......##\n####...#..#.........\n#.##.#.#..#........o\n#x.#...#..#.........\n#######S..########DP\n..K#.o.####....#....\n..##......#....#....\n####.o...o#....#..##\n#.##......#....#..##\n#v.#......#....#..#.\n...#.#o.o.#....#..##\n..####..x.#....#....\n######P#S##....###D#\n##..^......^.......#\n...o#......#........\n.K..#......#......#.\nv#..#......#......#.\n.#..#......#......##\n.#.o#......#...#####\n.##.#......#.xo.....\n#####......S##P####D\nSTICK\n9,50 L\n9,51 L\n9,52 L\n11,49 L\n11,50 L\n11,51 L\n10,57 I\n11,57 B\n16,61 BLT\n12,46 R\n12,47 R\n7,56 B\n8,56 B\n9,56 B","dividers":[1,9,17,25,33,44,55]};</script>
 <script>
 // ---------------------------------------------------------------------------
 // playground v3: the press is parked. the puzzle layer arrives —
@@ -594,14 +597,15 @@ function setRot(target){
 
 // --- input ---
 let ptr = null, lastX = 0, lastT = 0, dragVel = 0, lastDrag = -1e9;
-const SENS = 0.0058;
-window.addEventListener('pointerdown', e => { if(e.target.id === 'redo') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
+const SENS = 0.0040;   // drag sensitivity (lowered)
+let flipControls = false; try { flipControls = localStorage.getItem('tcFlip') === '1'; } catch(e){}   // on-screen toggle: invert ALL input so it feels like rotating the character, not the tower
+window.addEventListener('pointerdown', e => { if(e.target.id === 'redo' || e.target.id === 'flip') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
 window.addEventListener('pointermove', e => {
   if(e.pointerId !== ptr) return;
   const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(8, now - lastT);
   if(Math.abs(dx) > 1.5) lastDrag = now;
-  if(carrier){ rideSteer += dx * SENS * 1.5; }
-  else rotTarget += dx * SENS * (mode === 'cling' && !clTang(clFace) ? -1 : 1);   // ceiling/top CRAWL matches the floor (drag left -> hero goes right); only the vertical WALL climb is flipped so RIGHT climbs a wall on your right
+  if(carrier){ rideSteer += dx * SENS * 1.5 * (flipControls ? -1 : 1); }
+  else rotTarget += dx * SENS * (flipControls ? -1 : 1) * (mode === 'cling' && !clTang(clFace) ? -1 : 1);   // flip toggle inverts all input; cling: ceiling/top crawl matches the floor, only the vertical WALL climb is flipped
   if(rotTarget - rot > 1.2) rotTarget = rot + 1.2;
   else if(rotTarget - rot < -1.2) rotTarget = rot - 1.2;
   dragVel = (dx * SENS) / (dt / 1000);
@@ -615,6 +619,12 @@ const redoEl = document.getElementById('redo');
 redoEl.addEventListener('pointerdown', e => { e.stopPropagation();
   e.preventDefault(); e.stopPropagation();
   if(mode !== 'dead') die("you called it.");
+});
+const flipEl = document.getElementById('flip');
+function syncFlip(){ if(flipEl) flipEl.classList.toggle('on', flipControls); }
+syncFlip();
+if(flipEl) flipEl.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation();
+  flipControls = !flipControls; try { localStorage.setItem('tcFlip', flipControls ? '1' : '0'); } catch(err){} syncFlip();
 });
 const keys = {};
 addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key.toLowerCase() === 'r' && mode !== 'dead') die("you called it."); });
@@ -692,11 +702,10 @@ function frame(now){
     || (ptr !== null && (now - lastDrag) < 110) || Math.abs(rotTarget - rot) > 0.02;
   if(carrier){
     // on a mount: arrow/A/D nudges the dismount accumulator instead of rolling the world
-    if(keys['arrowleft'] || keys['a']) rideSteer += 5.5 * dt;
-    else if(keys['arrowright'] || keys['d']) rideSteer -= 5.5 * dt;
-  } else if(keys['arrowleft'] || keys['a']) rotTarget += 2.4 * dt * (mode === 'cling' && !clTang(clFace) ? -1 : 1);   // ceiling/top CRAWL matches the floor; only the vertical WALL climb is flipped so RIGHT climbs a wall on your right
-
-  else if(keys['arrowright'] || keys['d']) rotTarget -= 2.4 * dt * (mode === 'cling' && !clTang(clFace) ? -1 : 1);
+    if(keys['arrowleft'] || keys['a']) rideSteer += 5.5 * dt * (flipControls ? -1 : 1);
+    else if(keys['arrowright'] || keys['d']) rideSteer -= 5.5 * dt * (flipControls ? -1 : 1);
+  } else if(keys['arrowleft'] || keys['a']) rotTarget += 1.9 * dt * (flipControls ? -1 : 1) * (mode === 'cling' && !clTang(clFace) ? -1 : 1);   // 1.9 = lower key sensitivity; flip toggle inverts all input
+  else if(keys['arrowright'] || keys['d']) rotTarget -= 1.9 * dt * (flipControls ? -1 : 1) * (mode === 'cling' && !clTang(clFace) ? -1 : 1);
   else if(ptr === null && Math.abs(omega) > 0.02){ rotTarget += omega * dt; omega *= Math.pow(0.03, dt); }
   // momentum launch: the throw keeps advancing the target while airborne
   if(airCarry !== 0 && mode === 'air'){
