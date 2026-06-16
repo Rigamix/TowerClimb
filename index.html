@@ -28,7 +28,7 @@
 <div id="traj">&#10549; path</div>
 <div id="bigmsg"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>window.TOWER_LEVEL = {"code":"ROOM rows=64 width=20\n....................\n................o...\n................#...\nS....o..K...o......#\n#...........#.......\n#.o....#P#.##.##..##\n#.#D#^^...###.#...m#\n#^.....######P#^P###\n.#.......o.......X..\n..SN................\n..............##....\n..^^###P.#..#N.o###.\n...###.#...#o.K.....\n..####.#o#.#........\nC#####.#.#o#..x.###P\nO####v##^####P######\n......######vo..X...\n.....o#vvvv.........\n....v.#.....o.......\n...#..#K..........X.\nSN#..o##....^...NNN#\nK.....##...##CP#...#\n@.#..Y##...#o..#...#\n###P^####WP#.@.#^^^#\n......^##D###P##..#.\n...#.K...o####....#.\n...###v#..#..#....#.\n.o.#......####....#.\n...##.....#..#....#.\n...##..#.###.#....#.\n.x..#..#.....#....#.\n#########D####....SP\n......#.#..........#\n......#.#.#o.o....K#\n......#.#...#...####\n......#.#..ov#P#...#\n......#.#.#...v##..#\n......#.#.#...o.#..#\n......#.....@...#..#\n......###D#########S\n#......#..#.....####\n##.....#..#.#v^K....\n#......#..#....##...\n#.##...#..#o......##\n####...#..#.........\n#.##.#.#..#........o\n#x.#...#..#.........\n#######S..########DP\n..K#.o.####....#....\n..##......#....#....\n####.o...o#....#..##\n#.##......#....#..##\n#v.#......#....#..#.\n...#.#o.o.#....#..##\n..####..x.#....#....\n######P#S##....###D#\n##..^......^.......#\n...o#......#........\n.K..#......#......#.\nv#..#......#......#.\n.#..#......#......##\n.#.o#......#...#####\n.##.#......#.xo.....\n#####......S##P####D\nDIVIDERS 8,16,24,32,40,48,56\nSTICK\n11,49 L\n11,50 L\n11,51 L\n10,57 I\n11,57 B\n16,61 BLT\n12,47 R\n7,56 B\n8,56 B\n9,56 B\n7,42 R\n7,43 R","dividers":[8,16,24,32,40,48,56]};</script>
+<script>window.TOWER_LEVEL = {"code":"ROOM rows=64 width=20\n....................\n................o...\n................#...\nS....o..K...o......#\n#...........#.......\n#.o....#P####.##..##\n#.#D#^^...###.#...m#\n#^.....######P#^P###\n.#.......o.......X..\n.oSN................\n..............##....\n..^^###P.#..#N.o###.\n...###.#...#o.K.....\n..####.#o#.#........\nD#####.#.#o#..x.###P\nC####v##^####P######\n......######vo..X...\n.....o#vvvv.........\n....v.#.....o.......\n...#.o#K..........X.\nSN#...##....^...NNN#\nK....o##...##CP#...#\n@.#..Y##...#o.o#...#\n###P^####YP#.@.#^^^#\n......^##D###P##..#.\n...#.K...o####....#.\n...###v#..#..#....#.\n.o.#......####....#.\n...##.....#..#....#.\n...##..#.###.#....#.\n.x..#..#.....#....#.\n#########D####....SP\n......#.#..........#\n......#.#.#o.o....K#\n......#.#...#...####\n......#.#..ov#P#...#\n......#.#.#...v##..#\n......#.#.#...o.#..#\n......#.....@...#..#\n......###D#########S\n#......#..#.....####\n##.....#..#.#v^K....\n#......#..#....##...\n#.##...#..#o......##\n####...#..#.........\n#.##.#.#..#........o\n#x.#...#..#.........\n#######S..########DP\n..K#.o.####....#....\n..##......#....#....\n####.o...o#....#..##\n#.##......#....#..##\n#v.#......#....#..#.\n...#.#o.o.#....#..##\n..####..x.#....#....\n######P#S##....###D#\n##..^......^.......#\n...o#......#........\n.K..#......#......#.\nv#..#......#......#.\n.#..#......#......##\n.#.o#......#...#####\n.##.#......#.xo.....\n#####......S##P####D\nDIVIDERS 8,16,24,32,40,48,56\nSTICK\n11,49 L\n11,50 L\n11,51 L\n10,57 I\n11,57 B\n16,61 BLT\n12,47 R\n7,56 B\n8,56 B\n9,56 B\n7,42 R\n7,43 R\n9,50 L\n7,50 R","dividers":[8,16,24,32,40,48,56]};</script>
 <script>
 // ---------------------------------------------------------------------------
 // playground v3: the press is parked. the puzzle layer arrives —
@@ -225,10 +225,10 @@ function regDepthOFF(mesh, materials){
   const entries = materials.map(mt => ({ mt, graded: Array.from({ length: DEPTH_BANDS }, (_, b) => gradeColor(mt.color.clone(), b)), baseOp: mt.opacity }));
   depthReg.push({ mesh, entries, lastBand: -1 });
 }
-const hero = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0x33c2e6 }));   // (ART FORK) cyan-blue hero
+const hero = new THREE.Mesh(box, new THREE.MeshLambertMaterial({ color: 0xf5c518 }));   // (ART FORK) yellow hero
 hero.scale.set(0.92, 0.92, 0.92);
 hero.material.onBeforeCompile = heroCompile; hero.material.customProgramCacheKey = () => 'arthero'; hero.material.fog = false; hero.material.needsUpdate = true;   // (ART FORK) subtle per-face variation + manual fog
-hero.material.emissive = new THREE.Color(0x1c73eb);   // (ART FORK) outline colour (saturated blue); die() flips it to red, resetCommon restores it
+hero.material.emissive = new THREE.Color(0xefa315);   // (ART FORK) outline colour (amber — the hero-yellow nudged toward orange); die() flips it to red, resetCommon restores it
 // (ART FORK) the hero outline is drawn INSIDE the shape by heroCompile (inset edge band) — no hull, so it never pokes into the floor
 tower.add(hero);
 // (ART FORK) hero eyes — two LINE marks, billboarded to face the camera and ALWAYS drawn on top (never occluded)
@@ -246,7 +246,7 @@ const glowPlate = new THREE.Mesh(plate, new THREE.MeshBasicMaterial({ color: 0xf
 glowPlate.visible = false;   // (ART FORK) overlay plate retired — the under-hero block now brightens its own colour
 const ART_WHITE = new THREE.Color(1, 1, 1); let glowMat = null;
 // death: the hero flashes red then bursts into small red cubes
-const HERO_COL = 0x33c2e6, partGeo = new THREE.BoxGeometry(0.22, 0.22, 0.22);   // (ART FORK) cyan-blue hero (respawn restores this)
+const HERO_COL = 0xf5c518, partGeo = new THREE.BoxGeometry(0.22, 0.22, 0.22);   // (ART FORK) yellow hero (respawn restores this)
 const partMat1 = new THREE.MeshBasicMaterial({ color: 0xe23a3a }), partMat2 = new THREE.MeshBasicMaterial({ color: 0xff6a5a });
 let deathParts = [], deathBurstT = 0;
 function clearDeathParts(){ for(const p of deathParts) tower.remove(p.m); deathParts = []; }
@@ -272,21 +272,23 @@ function updateDeathParts(dt){
 }
 function updateTrajectory(){
   if(!trajOn || mode !== 'air'){ if(trajLine.visible) trajLine.visible = false; return; }
-  let y = heroY, v = vy, fcol = K;                                            // fcol = continuous column; it drifts sideways with the launch momentum
-  let colRate = Math.max(-6, Math.min(6, airCarry));                          // sideways drift (cols/sec) — matches the air airCarry term, capped to the chase speed
+  const spanA = Math.max(1e-4, midOf(K) - midOf(K - 1));                      // angular width of one column
+  let y = heroY, v = vy, fcol = K;                                            // fcol = continuous column; it drifts sideways with the hero's CURRENT horizontal motion
+  let colRate = Math.max(-6, Math.min(6, -rotVel / spanA));                   // sideways velocity (cols/sec) derived from the LIVE rot motion -> captures mid-air STEERING, not just the launch airCarry (the old airCarry-only version stayed straight whenever you steered by swiping, which is why it only ever drew straight lines)
   const pts = []; const dt2 = 0.03, floorY = (CUSTOM ? CUSTOM.winY : 12) - 1.5;
-  const startCol = fcol; let landed = false;
+  const startCol = fcol; let landed = false, maxDev = 0;
   for(let i = 0; i < 120; i++){
     const p = Pat(fcol); pts.push(new THREE.Vector3(p[0] - 2.5, y + 0.5, p[1] - 2.5));
-    fcol += colRate * dt2; colRate *= Math.pow(0.35, dt2); if(Math.abs(colRate) < 0.05) colRate = 0;   // drift decays like airCarry
+    maxDev = Math.max(maxDev, Math.abs(fcol - startCol));                     // how far the predicted path bends sideways (in columns)
+    fcol += colRate * dt2; colRate *= Math.pow(0.35, dt2); if(Math.abs(colRate) < 0.05) colRate = 0;   // drift decays like the air momentum
     v = Math.min(14, v + 26 * dt2);
     const ny = y - v * dt2;
     if(v > 0){ const r0 = Math.floor(ny + 0.02); if(solid(mod(Math.round(fcol)), r0)){ const pl = Pat(fcol); pts.push(new THREE.Vector3(pl[0] - 2.5, r0 + 1.5, pl[1] - 2.5)); landed = true; break; } }   // first solid below = landing spot
     y = ny;
     if(y < floorY) break;
   }
-  // show the landing guide whenever it's toggled on and the fall reaches a landing (curve no longer required)
-  if(landed && pts.length > 2){ trajLine.geometry.setFromPoints(pts); trajLine.computeLineDistances(); trajLine.visible = true; }
+  // (accessibility) draw the landing guide ONLY when the path actually CURVES (mid-air direction change) — a pure vertical jump with no sideways motion shows nothing
+  if(landed && pts.length > 2 && maxDev > 0.4){ trajLine.geometry.setFromPoints(pts); trajLine.computeLineDistances(); trajLine.visible = true; }
   else trajLine.visible = false;
 }
 
@@ -454,7 +456,7 @@ function buildWorld(){
         m.add(cr2); mats.push(cr2.material);
       }
     }
-    if(pads.has(key)){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0xfafe58 })); p.position.y = 0.5; m.add(p); mats.push(p.material); }   // (ART FORK) yellow-green jump pad
+    if(pads.has(key)){ const p = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: 0x2bc0e8 })); p.position.y = 0.5; m.add(p); mats.push(p.material); }   // (ART FORK) cyan-blue jump pad
     // per-face sticky plates: drawn ONLY on the exact painted faces (single-sided), from the same faceSet physics reads
     for(const F of 'BLROIT'){
       if(!faceSet.has(key + ',' + F)) continue;
@@ -672,7 +674,7 @@ function resetCommon(){
   airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; stepUpKey = null; stepUp = 0; stepUpAtTop = false; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
   clCell = null; clFace = null; clGuard = 0; clCamPull = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0; clVaultTop = false;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
-  hero.material.color.setHex(HERO_COL); hero.material.emissive.setHex(0x1c73eb); clearDeathParts(); deathBurstT = 0;   // restore the hero (body + blue outline) after a death burst
+  hero.material.color.setHex(HERO_COL); hero.material.emissive.setHex(0xefa315); clearDeathParts(); deathBurstT = 0;   // restore the hero (body + amber outline) after a death burst
 }
 function resetRun(msg){
   buildWorld(); resetCommon();
