@@ -616,7 +616,7 @@ const CLING_TURN = 0.30;          // cling corner turns ease a touch slower than
 // sticky cling: ONE mode that replaces wall+hang. clCell=the painted block [c,r], clFace=B/L/R/O/I,
 // clT=climb height, clSign=which push direction climbs UP (kept continuous across corners), clFacing=last move dir,
 // clGuard=brief no-regrab timer after letting go, clCamPull=eased camera dolly-back while on an outer (O) face.
-let clCell = null, clFace = null, clT = 0, clVel = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clReleaseT = 1, clDropTarget = 0, clPivX = 0, clPivY = 0, clPivZ = 0, clVaultTop = false;
+let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clReleaseT = 1, clDropTarget = 0, clPivX = 0, clPivY = 0, clPivZ = 0, clVaultTop = false;
 let camCornerPull = 0;
 let sandKey = null, sandT = 0;   // the sand block currently being stood on + how long (resets when you step off)
 let padCombo = 0, padArmKey = null, padArmT = 0;   // jump-pad: consecutive-bounce counter (2,3,4,5 sq) + a settle timer so a fresh bounce waits until the bottom is flat
@@ -670,7 +670,7 @@ function placeAt(cTarget, standY){
 }
 function resetCommon(){
   airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; stepUpKey = null; stepUp = 0; stepUpAtTop = false; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
-  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; clVel = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0; clVaultTop = false;   // never respawn mid-cling
+  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0; clVaultTop = false;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
   hero.material.color.setHex(HERO_COL); hero.material.emissive.setHex(0x1c73eb); clearDeathParts(); deathBurstT = 0;   // restore the hero (body + blue outline) after a death burst
 }
@@ -811,7 +811,7 @@ function clAttach(bc, br, F, sign){
   let d = ((clHeroCol(bc, F) - col()) % N + N) % N; if(d > N / 2) d -= N; K += d;   // center the hero's column
   if(F === 'B') heroY = br - 1;                       // ceiling: hang just under the block
   else if(!clTang(F)) heroY = br;                     // (#5) L/R/O/I: align feet to the grabbed block so the clung pose is UPRIGHT (never a diagonal mid-roll rest) and flush with the wall
-  clT = heroY; clVel = 0; clAnim = 0; rot = -angOf(K); rotTarget = rot;
+  clT = heroY; clAnim = 0; rot = -angOf(K); rotTarget = rot;
   squash = Math.max(squash, 0.12);
 }
 function clDetach(why){
@@ -895,7 +895,8 @@ function frame(now){
   // (#3) ENTER a step-roll the INSTANT you push toward a solid step-up (block / frozen mob) — so going UP starts as immediately as going DOWN (no waiting for a lean to build). Driven below, like the chase. Mounts fall through to the climbA fallback in the ground branch.
   if(mode === 'ground' && stepUpKey === null && climbA <= 0 && !carrier){
     const stE = rotTarget - rot;
-    if(Math.abs(stE) > 0.004){
+    const _shr = (midOf(K) - angOf(K)) || 0.157, _settled = Math.abs((-rot) - angOf(K)) < 0.08 * 2 * _shr;   // only start a climb once the cube is SETTLED on the block (not still mid flat-roll onto it) -> entering won't snap it upright (fixes the teleport when rolling onto a block that has a step-up beside it)
+    if(Math.abs(stE) > 0.004 && _settled){
       const sE = stE < 0 ? 1 : -1, ncE = mod(K + sE), rE = Math.floor(heroY + 0.02);
       if(solid(ncE, rE) && !solid(ncE, rE + 1) && !solid(col(), rE + 1) && !spikes.has(Kk(ncE, rE + 1))){
         stepUpKey = Kk(ncE, rE) + ',' + sE; stepUp = 0; stepUpAtTop = false; stepUpS = sE; stepUpNC = ncE; stepUpR = rE;
@@ -1252,16 +1253,18 @@ function frame(now){
         const upLeft = (clFace === 'L' || clFace === 'O');                    // on these, the CCW direction climbs UP (a consistent walk around the block)
         const vF = clFace;                                                   // the wall face we're on (for the corner-roll edge geometry)
         let dir = 0;
-        if(steer > 0.012) dir = upLeft ? 1 : -1; else if(steer < -0.012) dir = upLeft ? -1 : 1;   // (#3) deadzone: a tiny finger twitch no longer starts the climb
+        if(steer > 0.004) dir = upLeft ? 1 : -1; else if(steer < -0.004) dir = upLeft ? -1 : 1;   // (#1) small deadzone -> immediate, like the step-roll on standard blocks
+        const hwC = (midOf(K) - angOf(K)) || 0.157;
+        const inc = Math.min(Math.abs(steer) / (2 * hwC), CLING_SPD * dt);    // (#1) climb amount this frame ∝ the swipe, capped at the ground-roll rate -> IMMEDIATE & proportional (was a velocity RAMP toward CLING_SPD, which lagged at the start so it felt slow vs standard blocks)
         rotTarget = rot;                                                      // a wall never spins the tower
-        let climbVelTarget = 0;                                              // (#3) drive a smooth climb velocity (ramps in/out like the ground roll) instead of binary full-speed-or-stop -> no twitchy snap
+        let climbing = false;
         if(dir !== 0){
           const upWall = faced(bc, br + 1, clFace) && solid(bc, br + 1);      // the same wall continues one block up...
           const dnWall = faced(bc, br - 1, clFace) && solid(bc, br - 1);      // ...or down
           if(dir > 0){                                                        // pushing UP
-            if(upWall){ climbVelTarget = CLING_SPD; clFacing = 1; }           // climb the continuing wall (the block hand-off happens below)
+            if(upWall){ clT += inc; clFacing = 1; climbing = true; }          // climb the continuing wall, ∝ the swipe
             else {                                                            // reached the TOP of the wall -> act AT the corner, don't drift up into empty space
-              heroY = clT = br; clVel = 0;                                    // sit at the aligned top so the roll/hop starts on the edge
+              heroY = clT = br;                                               // sit at the aligned top so the roll/hop starts on the edge
               if(faced(bc, br, 'T')){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); showMsg("onto the top."); }   // sticky top -> wrap onto it
               else if(!solid(bc, br + 1)){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); clVaultTop = true; showMsg("over the top."); }   // item 1b: roll up & over onto the block's own (clear) top, then stand on it
               else clDetach('slip');                                          // nowhere to go -> let go
@@ -1270,27 +1273,23 @@ function frame(now){
             const feetR = Math.floor(heroY + 0.02), openCol = mod(2 * col() - bc);   // FLEXIBILITY: touching a regular block on the open side at your row counts as standing on it -> single-block vault, like the ground
             if(solid(openCol, feetR) && !solid(openCol, feetR + 1) && !solid(col(), feetR + 1) && !spikes.has(Kk(openCol, feetR + 1))){
               const oc = col(); let sgnc = openCol - oc; if(sgnc > N / 2) sgnc -= N; else if(sgnc < -N / 2) sgnc += N;
-              K += sgnc; heroY = feetR + 1; vy = 0; mode = 'ground'; clCell = null; clFace = null; clGuard = 0.2; clVel = 0;
+              K += sgnc; heroY = feetR + 1; vy = 0; mode = 'ground'; clCell = null; clFace = null; clGuard = 0.2;
               rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
               climbA = CLIMB_DUR;
               climbPivot = [(P[oc][0] + P[openCol][0]) / 2 - 2.5, feetR + 1, (P[oc][1] + P[openCol][1]) / 2 - 2.5];
               climbFrom = [P[oc][0] - 2.5, feetR + 0.5, P[oc][1] - 2.5];
               climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[openCol][0] - P[oc][0], 0, P[openCol][1] - P[oc][1])).normalize();
               tip = 0; showMsg("over the block.");
-            } else if(dnWall){ climbVelTarget = -CLING_SPD; clFacing = -1; }
+            } else if(dnWall){ clT -= inc; clFacing = -1; climbing = true; }
             else {                                                            // reached the BOTTOM of the wall
-              heroY = clT = br; clVel = 0;
+              heroY = clT = br;
               if(faced(bc, br, 'B')){ clFace = 'B'; heroY = clT = br - 1; clSnap(vF, 'B', bc, br); showMsg("under the ledge."); }   // sticky underside -> wrap under it
               else clDetach('slip');
             }
           }
         }
-        // (#3) ease the climb velocity toward its target, then advance -> smooth start AND stop instead of a hard snap
-        clVel += (climbVelTarget - clVel) * Math.min(1, dt * 9);
-        if(climbVelTarget === 0 && Math.abs(clVel) < 0.05) clVel = 0;
         if(mode === 'cling' && !clVaultTop && clFace && !clTang(clFace)){     // still on a vertical wall (didn't vault / wrap / detach this frame)
-          if(Math.abs(clVel) > 1e-4) clT += clVel * dt;
-          if(climbVelTarget === 0 && clVel === 0){ const tgt = Math.round(clT); if(Math.abs(clT - tgt) > 0.002) clT += (tgt - clT) * Math.min(1, dt * 10); }   // not climbing -> settle to the nearest block so you never rest mid-tumble (halfway up a block)
+          if(!climbing){ const tgt = Math.round(clT); if(Math.abs(clT - tgt) > 0.002) clT += (tgt - clT) * Math.min(1, dt * 10); }   // not climbing -> settle to the nearest block so you never rest mid-tumble (halfway up a block)
         }
         if(mode === 'cling'){
           heroY = clT;
