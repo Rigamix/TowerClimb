@@ -524,7 +524,7 @@ function buildWorld(){
     const bm = new THREE.MeshLambertMaterial({ color: bc2 });
     const body = new THREE.Mesh(box, bm); body.scale.set(0.82, 0.82, 0.82); grp.add(body);
     if(M.type === 'normal'){ bm.onBeforeCompile = mobCompile; bm.customProgramCacheKey = () => 'artmob'; }   // colour the actual top face green; no cap plate
-    else { const cap = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: cc2 })); cap.scale.set(0.84, 1, 0.84); cap.position.y = 0.42; grp.add(cap); }
+    else { const cap = new THREE.Mesh(plate, new THREE.MeshLambertMaterial({ color: cc2 })); cap.scale.set(0.84, 1, 0.84); cap.position.y = 0.42; grp.add(cap); M.capMat = cap.material; M.capCol = cc2; }   // keep a ref so the cap (mount's green TOP) can flash red on frown
     body.add(edgeLine(0xd8c4f8));
     if(M.type === 'spiky'){
       const sm2 = new THREE.MeshLambertMaterial({ color: 0xe06a7e });
@@ -739,7 +739,7 @@ window.addEventListener('pointermove', e => {
   const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(8, now - lastT);
   if(Math.abs(e.clientX - downX) > 10) tapMoved = true;   // moved past the dead-zone => it's a drag, not a tap
   if(Math.abs(dx) > 1.5) lastDrag = now;
-  if(carrier){ rideSteer += dx * SENS * 1.5 * (flipControls ? -1 : 1); }
+  if(carrier){ rideSteer += dx * SENS * (flipControls ? -1 : 1); }   // (#1) accumulate at the SAME rate as a ground roll's rotTarget -> ONE block of swipe = one dismount step (threshold = 2hR, in the ride block)
   else rotTarget += dx * SENS * (flipControls ? -1 : 1) * (mode === 'cling' && !clTang(clFace) ? -1 : 1);   // flip toggle inverts all input; cling: ceiling/top crawl matches the floor, only the vertical WALL climb is flipped
   if(rotTarget - rot > 1.2) rotTarget = rot + 1.2;
   else if(rotTarget - rot < -1.2) rotTarget = rot - 1.2;
@@ -950,7 +950,7 @@ function frame(now){
 
   // (#3) STEP-ROLL: climbing onto a block / frozen mob is driven DIRECTLY by your swipe, through the SAME chase as the ground roll — it starts the instant you push and its speed tracks your finger (rate-limited to ROTMAX), exactly like rolling along / down a cube. Released, it teeters: complete past halfway, else rock back down. The cube renders the 180° roll over the step's top edge.
   if(stepUpKey !== null){
-    const span = 2 * (2 * (midOf(K) - angOf(K)));                         // a full 180° step-roll = 2 column-widths of input (one column-roll = 2*hR)
+    const span = 2 * (midOf(K) - angOf(K));                               // (#3) one full step-roll = ONE column-width of input (2*hR) — EXACTLY the flat ground roll's finger travel (was 2 columns, so climbing up needed 2x the swipe)
     const cap = ROTMAX * dt / span;                                       // per-frame roll cap = the ground roll's max angular speed
     if(driving){                                                          // actively swiping -> the roll tracks the swipe, rate-limited exactly like the ground roll
       stepUp += Math.max(-cap, Math.min(cap, (-stepUpS * (rotTarget - rot)) / span));
@@ -1026,7 +1026,7 @@ function frame(now){
             const ph = M.rideT < 2 ? 'happy' : (M.rideT < 3.5 ? 'neutral' : 'frown');
             if(ph !== M.phase){ M.phase = ph; for(const fg of M.faces) setMouth(fg, ph); }
             if(M.rideT >= 5) die("it turned.");
-            if(Math.abs(rideSteer) >= 1){                                          // a sideways nudge steps you off the lift
+            if(Math.abs(rideSteer) >= 2 * (midOf(K) - angOf(K))){                  // (#1) ONE block's swipe steps you off the lift (same finger travel as a ground roll)
               const sstep = rideSteer > 0 ? 1 : -1; rideSteer = 0; const hr = Math.floor(heroY + 0.02);
               if(solid(mod(K + sstep), hr - 1) && !solid(mod(K + sstep), hr)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; heroY = hr; vy = 0; squash = 0.12; rot = -angOf(K); rotTarget = rot; }   // a block level beside the lift -> roll onto it
               else if(canEnter(K + sstep)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; mode = 'air'; vy = -2; }                       // open air -> hop off
@@ -1049,7 +1049,7 @@ function frame(now){
           Math.abs(Math.floor(heroY + 0.02) - 1 - M.row) <= 0;
         if(ridden){
           ridingNow = true;
-          if(Math.abs(rideSteer) >= 1){
+          if(Math.abs(rideSteer) >= 2 * (midOf(K) - angOf(K))){   // (#1) ONE block's swipe to step off (matches the ground roll's finger travel; was a fixed >=1 that needed ~2x the swipe)
             const sstep = rideSteer > 0 ? 1 : -1;
             rideSteer = 0;
             const nc = mod(K + sstep), hr = Math.floor(heroY + 0.02), F = sstep > 0 ? 'L' : 'R';   // hr = the hero's feet row (= the mount's row + 1)
@@ -1459,10 +1459,12 @@ function frame(now){
         const blink = 0.5 + 0.5 * Math.sin(M.rideT * freq);
         const c = new THREE.Color(0xff2a2a).lerp(new THREE.Color(0xffffff), blink * (0.4 + 0.6 * t));
         M.bodyMat.color.copy(c);
+        if(M.capMat) M.capMat.color.copy(c);                             // (#2) the TOP/cap flashes red too -> the WHOLE mount reads "about to kill", not just the sides
         M.grp.scale.setScalar(1 + 0.08 * t * blink);
       } else {
         M.bodyMat.color.setHex(M.type === 'spiky' ? 0xc0455a :
           M.type === 'mount' ? (M.phase === 'neutral' ? 0xd4b75f : 0x4fae6f) : 0xc0455a);   // stomp mob: RED sides like the spiky (mobCompile keeps the TOP face green); frozen -> blue above
+        if(M.capMat) M.capMat.color.setHex(M.capCol);                    // (#2) not frowning -> the cap returns to its base colour
         M.grp.scale.setScalar(1);
       }
       M.grp.scale.set(1, 1, 1);
