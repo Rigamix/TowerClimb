@@ -1029,7 +1029,7 @@ function frame(now){
             if(Math.abs(rideSteer) >= 2 * (midOf(K) - angOf(K))){                  // (#1) ONE block's swipe steps you off the lift (same finger travel as a ground roll)
               const sstep = rideSteer > 0 ? 1 : -1; rideSteer = 0; const hr = Math.floor(heroY + 0.02);
               if(solid(mod(K + sstep), hr - 1) && !solid(mod(K + sstep), hr)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; heroY = hr; vy = 0; squash = 0.12; rot = -angOf(K); rotTarget = rot; }   // a block level beside the lift -> roll onto it
-              else if(canEnter(K + sstep)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; mode = 'air'; vy = -2; }                       // open air -> hop off
+              else if(canEnter(K + sstep)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; mode = 'air'; vy = solid(K, hr + 1) ? 0 : -2; rotLag = rot + angOf(K); rot = -angOf(K); rotTarget = rot; }   // open air -> hop off: K AND rot move to the gap (glide via rotLag) so the chase doesn't drag you back over the lift; ceiling above -> drop in, don't bonk up
             }
           } else if(M.rideT !== 0){ M.rideT = 0; M.phase = 'happy'; for(const fg of M.faces) setMouth(fg, 'happy'); }   // stepped off -> the lift goes friendly again
           continue;
@@ -1066,7 +1066,7 @@ function frame(now){
             } else if(solid(nc, hr - 1) && !solid(nc, hr)){              // a block LEVEL with you (next to the mount) -> ROLL onto it like rolling along two floor blocks (no hop)
               const oc = col(); K += sstep; justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'ground'; heroY = hr; vy = 0; squash = 0.12;
               rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;   // the view recenters with a roll, so the cube rolls off the mount onto the block
-            } else if(canEnter(K + sstep)){ justLeft = carrier; jlTimer = 0.9; K += sstep; carrier = null; rideFrac = null; mode = 'air'; vy = -8; }   // open air -> hop off
+            } else if(canEnter(K + sstep)){ justLeft = carrier; jlTimer = 0.9; K += sstep; carrier = null; rideFrac = null; mode = 'air'; vy = solid(K, hr + 1) ? 0 : -8; rotLag = rot + angOf(K); rot = -angOf(K); rotTarget = rot; }   // open air -> hop off: move K AND rot to the gap (glide via rotLag) so the air chase doesn't pull you back onto the mount; a ceiling capping the gap -> drop straight in instead of bonking UP into it
           }
           if(carrier === M){
             const cc3 = Math.round(M.c);
