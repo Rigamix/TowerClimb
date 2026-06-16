@@ -626,7 +626,7 @@ const TOPS = [58, 52, 46, 35, 29, 22];
 const ENTRIES = [[1, 59], [4, 53], [10, 47], [14, 36], [8, 30], [4, 23], [6, 15]];
 const ROOM_NAMES = ['the deck', 'room one: the gap', 'room two: the ledge', 'room three: the shaft', 'room four: the tenant', 'room five: the cracked floor', 'room six: the band run'];
 function roomIndex(y){ let i = 0; for(const t of TOPS) if(y < t + 0.95) i++; return i; }
-const TOPPLE_A = 5.5, LEAN = 0.04, ROTMAX = 2.0, CHASE_K = 12;
+const TOPPLE_A = 5.5, LEAN = 0.04, CLIMB_LEAN = 0.5, ROTMAX = 2.0, CHASE_K = 12;   // CLIMB_LEAN: how far the cube may lean INTO a climbable step-up block before the vault commits (vs the tiny LEAN against a plain wall)
 const EDGE_STEP = 0.99;   // while HOLDING, walking off an edge / down a drop commits to the fall only when you push to ~90° of roll (1.0 = a full 90°), not at the 45° midpoint — so you're in full control up to the brink
 const EDGE_BALANCE = 0.5;  // on RELEASE, gravity tips the cube the rest of the way over if it's past the balance point (45° = CoM over the pivot edge); below it, the cube rocks back upright
 let rotTarget = 0, carryFrom = 0, carryT = 0, carryDur = 0.32;
@@ -708,12 +708,15 @@ function setRot(target){
     const hR = midOf(K) - angOf(K), hL = angOf(K) - midOf(K - 1);
     const dropR = mode === 'ground' && enterR && !solid(K + 1, r0);   // a continuing floor rolls over at the 45° midpoint; an EDGE / step-down waits until ~90° so you can teeter over the brink
     const dropL = mode === 'ground' && enterL && !solid(K - 1, r0);
+    // (#3) a CLIMBABLE step-up (a solid block one row up beside you, clear above) lets the cube lean INTO it like a teeter (up to CLIMB_LEAN) so the vault commits on the LEAN, not a hold-timer -> responsive, no delay. Frozen mobs are in solidSet, so this covers climbing onto them too.
+    const climbR = mode === 'ground' && !enterR && solid(K + 1, r0 + 1) && !solid(K + 1, r0 + 2) && !solid(K, r0 + 2) && !spikes.has(Kk(K + 1, r0 + 2));
+    const climbL = mode === 'ground' && !enterL && solid(K - 1, r0 + 1) && !solid(K - 1, r0 + 2) && !solid(K, r0 + 2) && !spikes.has(Kk(K - 1, r0 + 2));
     const stepR = dropR ? angOf(K) + 2 * hR * EDGE_STEP : midOf(K);
     const stepL = dropL ? angOf(K) - 2 * hL * EDGE_STEP : midOf(K - 1);
     if(a >= stepR && enterR){ K += 1; continue; }
     if(a < stepL && enterL){ K -= 1; continue; }
-    const hi = enterR ? (dropR ? angOf(K) + 2 * hR : midOf(K) - 1e-6) : angOf(K) + 2 * hR * LEAN;   // a drop lets the cube lean clear to 90°; a wall only ~LEAN
-    const lo = enterL ? (dropL ? angOf(K) - 2 * hL : midOf(K - 1)) : angOf(K) - 2 * hL * LEAN;
+    const hi = enterR ? (dropR ? angOf(K) + 2 * hR : midOf(K) - 1e-6) : angOf(K) + 2 * hR * (climbR ? CLIMB_LEAN : LEAN);   // a drop leans clear to 90°; a climbable step-up leans into it; a plain wall only ~LEAN
+    const lo = enterL ? (dropL ? angOf(K) - 2 * hL : midOf(K - 1)) : angOf(K) - 2 * hL * (climbL ? CLIMB_LEAN : LEAN);
     const ca = Math.min(hi, Math.max(lo, a));
     if(ca !== a){ rotLag += (rot - (-ca)); rot = -ca; omega = 0; return; }
     rot = target; return;
@@ -1163,7 +1166,7 @@ function frame(now){
         } else if(climbable){
           if(climbDir !== s){ climbDir = s; climbHold = 0; }
           climbHold += dt;
-          if(climbHold >= 0.18){                          // (#3) a touch more deliberate so a tiny brush past a block doesn't pop you up
+          if(Math.abs(g) >= 0.35 || climbHold >= 0.16){   // (#3) commit on a deliberate LEAN into the step (responsive, no dead delay onto blocks / frozen mobs) — hold-timer is just a fallback (e.g. a mount, whose lean can't build)
             const oc = mod(K), tc = mod(K + s);
             K += s; heroY = r + 1; vy = 0;
             rotLagInit = rot + angOf(K); rotLag = rotLagInit;  // world recenters on the vault's curve
