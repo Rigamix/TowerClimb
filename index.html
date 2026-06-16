@@ -519,7 +519,7 @@ function buildWorld(){
   }
   for(const M of MONSTERS){
     const grp = new THREE.Group();
-    const COLS = { normal: [0xd64a4a, 0xc9aef0], spiky: [0xc0455a, 0x6e2a38], mount: [0x4fae6f, 0x8fe3a8] };   // (ART) normal = "stomp" mob: red body + green TOP FACE via shader (no cap plate)
+    const COLS = { normal: [0xc0455a, 0xc9aef0], spiky: [0xc0455a, 0x6e2a38], mount: [0x4fae6f, 0x8fe3a8] };   // (ART) normal = "stomp" mob: red body (like spiky) + green TOP FACE via shader (no cap plate)
     const [bc2, cc2] = COLS[M.type] || COLS.normal;
     const bm = new THREE.MeshLambertMaterial({ color: bc2 });
     const body = new THREE.Mesh(box, bm); body.scale.set(0.82, 0.82, 0.82); grp.add(body);
@@ -1148,7 +1148,7 @@ function frame(now){
       else { if(padArmKey !== supKey){ padArmKey = supKey; padArmT = 0.09; } padArmT -= dt;
         if(padArmT <= 0){ vy = launch; mode = 'air'; squash = 0; padCombo = 1; padArmKey = null; showMsg("sproing."); } }  // fresh -> wait a beat (flat), then launch
     }
-    else if(spikes.has(Kk(col(), sup + 1))){ if(spikeLean() < SPIKE_LEAN) die("the spikes."); }   // only die once the cube is actually OVER the spike column, not at the mid-roll boundary
+    else if(spikes.has(Kk(col(), sup + 1)) && !cspikes.has(Kk(col(), sup + 1))){ if(spikeLean() < SPIKE_LEAN) die("the spikes."); }   // FLOOR spike only (a ceiling-spike cell is also in `spikes` but its hazard is the down-cone at the TOP -> handled by the rising check, NOT here, so standing UNDER it doesn't kill)
     else if(doorSet.has(supKey)){
       if(keyCount > 0){
         doorSet.delete(supKey); keyCount--; hud();
@@ -1230,7 +1230,7 @@ function frame(now){
         // ----- HORIZONTAL face (B ceiling / T top): crawl tangentially (the chase owns K); at the run's edge, wrap onto the side -----
         const isTop = clFace === 'T', bodyR = isTop ? br + 1 : br - 1;
         heroY = bodyR; clT = K;
-        if(spikes.has(Kk(col(), bodyR))){ die("the spikes."); }
+        if(spikes.has(Kk(col(), bodyR)) && !cspikes.has(Kk(col(), bodyR))){ die("the spikes."); }   // FLOOR spike only (ceiling-spike cells handled by the rising check)
         else {
           if(faced(col(), br, clFace) && solid(col(), br)){ clCell = [col(), br]; bc = col(); }   // crawled onto the next block
           const hH = angOf(K) - midOf(K - 1), hH2 = midOf(K) - angOf(K), daH = (-rot) - angOf(K);
@@ -1294,7 +1294,7 @@ function frame(now){
         if(mode === 'cling'){
           heroY = clT;
           const feet = Math.floor(heroY + 0.02);
-          if(spikes.has(Kk(col(), feet))){ die("the spikes."); }
+          if(spikes.has(Kk(col(), feet)) && !cspikes.has(Kk(col(), feet))){ die("the spikes."); }   // FLOOR spike only (ceiling-spike cells handled by the rising check)
           else if(feet > br && faced(bc, br + 1, clFace) && solid(bc, br + 1)){ clCell = [bc, br + 1]; }   // climbed up onto the next wall block
           else if(feet < br && faced(bc, br - 1, clFace) && solid(bc, br - 1)){ clCell = [bc, br - 1]; }   // climbed down onto the next
         }
@@ -1361,7 +1361,7 @@ function frame(now){
       }
       if(mode === 'air'){
         const ck = Kk(col(), r0);
-        if(spikes.has(Kk(col(), r0 + 1)) && ny <= r0 + 1.05 && spikeLean() < SPIKE_LEAN){   // (#2) + horizontal gate: landing at the rim of the column (not over the spikes) is survivable
+        if(spikes.has(Kk(col(), r0 + 1)) && !cspikes.has(Kk(col(), r0 + 1)) && ny <= r0 + 1.05 && spikeLean() < SPIKE_LEAN){   // (#2) FLOOR spike only (ceiling-spike cells handled by the rising check) + horizontal gate: landing at the rim of the column (not over the spikes) is survivable
           die("the spikes."); heroY = r0 + 1;
         } else if(crackedSet.has(ck) && vy >= CRACK_V){
           crackedSet.delete(ck); solidSet.delete(ck); removeCell(ck);
@@ -1456,7 +1456,7 @@ function frame(now){
         M.grp.scale.setScalar(1 + 0.08 * t * blink);
       } else {
         M.bodyMat.color.setHex(M.type === 'spiky' ? 0xc0455a :
-          M.type === 'mount' ? (M.phase === 'neutral' ? 0xd4b75f : 0x4fae6f) : 0x8f5fd4);
+          M.type === 'mount' ? (M.phase === 'neutral' ? 0xd4b75f : 0x4fae6f) : 0xc0455a);   // stomp mob: RED sides like the spiky (mobCompile keeps the TOP face green); frozen -> blue above
         M.grp.scale.setScalar(1);
       }
       M.grp.scale.set(1, 1, 1);
