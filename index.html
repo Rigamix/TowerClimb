@@ -759,6 +759,9 @@ function tapStep(x){
   if(mode === 'ground' || (mode === 'cling' && clTang(clFace))){                // ground OR ceiling/top crawl: roll exactly one column
     tapKind = 'ground'; tapTargetRot = -angOf(K - pushSign); tapMark = K; tapT = 0.3; return;
   }
+  if(mode === 'air'){                                                           // mid-jump: nudge the trajectory EXACTLY ONE column toward the tap, for precise air steering (tap again for another block)
+    tapKind = 'air'; tapTargetRot = -angOf(K - pushSign); tapMark = K; tapT = 0.6; return;
+  }
 }
 window.addEventListener('pointerup', release);
 window.addEventListener('pointercancel', release);
@@ -883,6 +886,9 @@ function frame(now){
     if(mode === 'dead'){ tapT = 0; }
     else if(tapKind === 'ground'){
       if(!(mode === 'ground' || (mode === 'cling' && clTang(clFace))) || K !== tapMark) tapT = 0;   // rolled one column (or left a column-driven mode)
+      else { tapT -= dt; rotTarget = tapTargetRot; }
+    } else if(tapKind === 'air'){
+      if(mode !== 'air' || K !== tapMark) tapT = 0;   // drifted one column across, or landed -> done
       else { tapT -= dt; rotTarget = tapTargetRot; }
     } else {
       if(mode !== 'cling' || !clCell || clTang(clFace) || Math.abs(clT - tapMark) >= 0.9) tapT = 0;   // climbed ~one block (the settle eases the last sliver), or wrapped / detached
