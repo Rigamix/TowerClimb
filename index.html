@@ -610,7 +610,9 @@ function openCountDoor(){
 let rot = 0, omega = 0, K = 2, heroY = 59, vy = 0, mode = 'ground', squash = 0, respawnT = 0, tip = 0, coinCount = 0, camLead = 0, keyCount = 0, lockMsgCd = 0, ridingNow = false;
 let climbHold = 0, climbDir = 0, climbedOnce = false, yLag = 0, rotLag = 0, wallC = 0, wallSide = 0;
 let climbA = 0, rotLagInit = 0, climbPivot = null, climbAxis = null, climbFrom = null;
-const CLIMB_DUR = 0.34;           // block-vault roll (#3: slower again so a step-up eases up smoothly instead of snapping)
+let stepUpKey = null, stepUp = 0, stepUpVel = 0, stepUpNC = 0, stepUpR = 0, stepUpS = 0;   // (#3) step-roll: climbing onto a block / frozen mob as a continuous INPUT-DRIVEN roll (same drive as a normal roll), replacing the canned climbA vault for ground step-ups
+const CLIMB_DUR = 0.34;           // block-vault roll — now only the cling open-side vault + mount step-up (the ground step-up uses the input-driven step-roll below)
+const STEP_SPD = 2.6;             // step-roll angular speed: matches the ground roll's peak (~0.133 rad of cube rotation per frame); a full 180° roll-up takes ~0.39s, i.e. the same angular RATE as a 90° flat roll
 const CLING_TURN = 0.30;          // cling corner turns ease a touch slower than the block-vault, for smoothness
 // sticky cling: ONE mode that replaces wall+hang. clCell=the painted block [c,r], clFace=B/L/R/O/I,
 // clT=climb height, clSign=which push direction climbs UP (kept continuous across corners), clFacing=last move dir,
@@ -626,7 +628,7 @@ const TOPS = [58, 52, 46, 35, 29, 22];
 const ENTRIES = [[1, 59], [4, 53], [10, 47], [14, 36], [8, 30], [4, 23], [6, 15]];
 const ROOM_NAMES = ['the deck', 'room one: the gap', 'room two: the ledge', 'room three: the shaft', 'room four: the tenant', 'room five: the cracked floor', 'room six: the band run'];
 function roomIndex(y){ let i = 0; for(const t of TOPS) if(y < t + 0.95) i++; return i; }
-const TOPPLE_A = 5.5, LEAN = 0.04, CLIMB_LEAN = 0.5, ROTMAX = 2.0, CHASE_K = 12;   // CLIMB_LEAN: how far the cube may lean INTO a climbable step-up block before the vault commits (vs the tiny LEAN against a plain wall)
+const TOPPLE_A = 5.5, LEAN = 0.04, ROTMAX = 2.0, CHASE_K = 12;
 const EDGE_STEP = 0.99;   // while HOLDING, walking off an edge / down a drop commits to the fall only when you push to ~90° of roll (1.0 = a full 90°), not at the 45° midpoint — so you're in full control up to the brink
 const EDGE_BALANCE = 0.5;  // on RELEASE, gravity tips the cube the rest of the way over if it's past the balance point (45° = CoM over the pivot edge); below it, the cube rocks back upright
 let rotTarget = 0, carryFrom = 0, carryT = 0, carryDur = 0.32;
@@ -668,7 +670,7 @@ function placeAt(cTarget, standY){
   spawnGuard = 0.9;                      // a breath before the tenant counts
 }
 function resetCommon(){
-  airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
+  airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; stepUpKey = null; stepUp = 0; stepUpVel = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
   clCell = null; clFace = null; clGuard = 0; clCamPull = 0; clVel = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0; clVaultTop = false;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
   hero.material.color.setHex(HERO_COL); hero.material.emissive.setHex(0x1c73eb); clearDeathParts(); deathBurstT = 0;   // restore the hero (body + blue outline) after a death burst
@@ -708,15 +710,12 @@ function setRot(target){
     const hR = midOf(K) - angOf(K), hL = angOf(K) - midOf(K - 1);
     const dropR = mode === 'ground' && enterR && !solid(K + 1, r0);   // a continuing floor rolls over at the 45° midpoint; an EDGE / step-down waits until ~90° so you can teeter over the brink
     const dropL = mode === 'ground' && enterL && !solid(K - 1, r0);
-    // (#3) a CLIMBABLE step-up (a solid block one row up beside you, clear above) lets the cube lean INTO it like a teeter (up to CLIMB_LEAN) so the vault commits on the LEAN, not a hold-timer -> responsive, no delay. Frozen mobs are in solidSet, so this covers climbing onto them too.
-    const climbR = mode === 'ground' && !enterR && solid(K + 1, r0 + 1) && !solid(K + 1, r0 + 2) && !solid(K, r0 + 2) && !spikes.has(Kk(K + 1, r0 + 2));
-    const climbL = mode === 'ground' && !enterL && solid(K - 1, r0 + 1) && !solid(K - 1, r0 + 2) && !solid(K, r0 + 2) && !spikes.has(Kk(K - 1, r0 + 2));
     const stepR = dropR ? angOf(K) + 2 * hR * EDGE_STEP : midOf(K);
     const stepL = dropL ? angOf(K) - 2 * hL * EDGE_STEP : midOf(K - 1);
     if(a >= stepR && enterR){ K += 1; continue; }
     if(a < stepL && enterL){ K -= 1; continue; }
-    const hi = enterR ? (dropR ? angOf(K) + 2 * hR : midOf(K) - 1e-6) : angOf(K) + 2 * hR * (climbR ? CLIMB_LEAN : LEAN);   // a drop leans clear to 90°; a climbable step-up leans into it; a plain wall only ~LEAN
-    const lo = enterL ? (dropL ? angOf(K) - 2 * hL : midOf(K - 1)) : angOf(K) - 2 * hL * (climbL ? CLIMB_LEAN : LEAN);
+    const hi = enterR ? (dropR ? angOf(K) + 2 * hR : midOf(K) - 1e-6) : angOf(K) + 2 * hR * LEAN;   // a drop leans clear to 90°; a wall / climbable step only leans ~LEAN, then the step-roll takes over the climb
+    const lo = enterL ? (dropL ? angOf(K) - 2 * hL : midOf(K - 1)) : angOf(K) - 2 * hL * LEAN;
     const ca = Math.min(hi, Math.max(lo, a));
     if(ca !== a){ rotLag += (rot - (-ca)); rot = -ca; omega = 0; return; }
     rot = target; return;
@@ -894,7 +893,7 @@ function frame(now){
   // soft speed cap: rot chases the target, velocity saturates instead of snapping.
   // SKIP entirely while riding a mount — the ride block owns rot and K; setRot() here would
   // nudge K and fight the carry, spinning the cube.
-  if(!carrier && !(mode === 'cling' && clFace && !clTang(clFace))){   // only vertical (L/R) cling consumes input as climb, not spin; walk-along faces keep the chase
+  if(!carrier && !(mode === 'cling' && clFace && !clTang(clFace)) && stepUpKey === null){   // a step-roll (like a vertical cling) consumes input as climb-progress, not tower spin — skip the chase
     const lagD = rotTarget - rot;
     if(Math.abs(lagD) > 1e-5){
       const vel = Math.sign(lagD) * Math.min(Math.abs(lagD) * CHASE_K, ROTMAX);
@@ -903,7 +902,7 @@ function frame(now){
       if(Math.abs(rot - want) > 1e-9){ rotTarget = rot; omega = 0; airCarry = 0; }
     }
   }
-  if(!driving && !carrier && Math.abs(omega) <= 0.6 && carryT <= 0 && !ridingNow && mode !== 'cling'){
+  if(!driving && !carrier && Math.abs(omega) <= 0.6 && carryT <= 0 && !ridingNow && mode !== 'cling' && stepUpKey === null){
     omega = 0;
     const hL = angOf(K) - midOf(K - 1), hR = midOf(K) - angOf(K);
     const da = (-rot) - angOf(K);
@@ -927,6 +926,21 @@ function frame(now){
       rotTarget = rot;
     } else tip = 0;
   } else tip = 0;
+
+  // (#3) STEP-ROLL: climbing onto a block / frozen mob rolls EXACTLY like a normal roll — driven by your push at the roll's natural speed, and you control it (hold to roll up, release before halfway to rock back down). Set up in the ground climb branch; the cube renders the 180° roll over the step's top edge.
+  if(stepUpKey !== null){
+    const steer = rotTarget - rot;
+    const pushing = stepUpS > 0 ? steer < -0.012 : steer > 0.012;        // still pushing toward the step
+    const targetVel = pushing ? STEP_SPD : (stepUp >= 0.5 ? STEP_SPD : -STEP_SPD * 0.8);   // hold to roll up; let go past halfway -> completes, before halfway -> rocks back down
+    stepUpVel += (targetVel - stepUpVel) * Math.min(1, dt * 12);          // ease the roll speed in/out so start & stop are smooth (the ramp gives the same accel feel as the chase)
+    stepUp += stepUpVel * dt;
+    rotTarget = rot; omega = 0;                                           // consume the input — no tower spin while step-rolling
+    if(stepUp >= 1){                                                      // rolled all the way up -> stand on the block
+      let d = ((stepUpNC - mod(K)) % N + N) % N; if(d > N / 2) d -= N; K += d;
+      heroY = stepUpR + 1; vy = 0; mode = 'ground'; rot = -angOf(K); rotTarget = rot; rotLag = 0;
+      stepUpKey = null; stepUp = 0; stepUpVel = 0; squash = 0.14; tip = 0; climbedOnce = true;
+    } else if(stepUp <= 0){ stepUpKey = null; stepUp = 0; stepUpVel = 0; }   // rocked back down -> cancel, stay on the lower floor
+  }
 
   // bands step on their own clocks, in their own directions
   for(const B of BANDS){
@@ -1164,19 +1178,30 @@ function frame(now){
             showMsg("the wall holds.");
           }
         } else if(climbable){
-          if(climbDir !== s){ climbDir = s; climbHold = 0; }
-          climbHold += dt;
-          if(Math.abs(g) >= 0.35 || climbHold >= 0.16){   // (#3) commit on a deliberate LEAN into the step (responsive, no dead delay onto blocks / frozen mobs) — hold-timer is just a fallback (e.g. a mount, whose lean can't build)
-            const oc = mod(K), tc = mod(K + s);
-            K += s; heroY = r + 1; vy = 0;
-            rotLagInit = rot + angOf(K); rotLag = rotLagInit;  // world recenters on the vault's curve
-            rot = -angOf(K); rotTarget = rot;
-            climbA = CLIMB_DUR;
-            climbPivot = [(P[oc][0] + P[tc][0]) / 2 - 2.5, r + 1, (P[oc][1] + P[tc][1]) / 2 - 2.5];
-            climbFrom = [P[oc][0] - 2.5, r + 0.5, P[oc][1] - 2.5];
-            climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[tc][0] - P[oc][0], 0, P[tc][1] - P[oc][1])).normalize();
-            tip = 0; climbHold = 0;
-            if(!climbedOnce){ climbedOnce = true; showMsg("a single block. you step up."); }
+          if(solid(nc, r)){                                  // (#3) a solid block / frozen mob -> begin an input-driven STEP-ROLL (rolls exactly like a normal cube roll; driven by the step-roll block above)
+            if(stepUpKey === null){
+              const tc = mod(K + s);
+              stepUpKey = Kk(tc, r) + ',' + s; stepUp = 0; stepUpVel = 0; stepUpS = s; stepUpNC = tc; stepUpR = r;
+              climbPivot = [(P[mod(K)][0] + P[tc][0]) / 2 - 2.5, r + 1, (P[mod(K)][1] + P[tc][1]) / 2 - 2.5];   // pivot = the step's TOP-near edge; the cube rolls 180° up and over it
+              climbFrom = [P[mod(K)][0] - 2.5, r + 0.5, P[mod(K)][1] - 2.5];
+              climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[tc][0] - P[mod(K)][0], 0, P[tc][1] - P[mod(K)][1])).normalize();
+              rot = -angOf(K); rotTarget = rot; climbHold = 0;   // straighten the tower; the step-roll renders the climb
+            }
+          } else {                                            // a MOUNT (not solid, via the fallback) -> keep the climbA vault
+            if(climbDir !== s){ climbDir = s; climbHold = 0; }
+            climbHold += dt;
+            if(climbHold >= 0.16){
+              const oc = mod(K), tc = mod(K + s);
+              K += s; heroY = r + 1; vy = 0;
+              rotLagInit = rot + angOf(K); rotLag = rotLagInit;
+              rot = -angOf(K); rotTarget = rot;
+              climbA = CLIMB_DUR;
+              climbPivot = [(P[oc][0] + P[tc][0]) / 2 - 2.5, r + 1, (P[oc][1] + P[tc][1]) / 2 - 2.5];
+              climbFrom = [P[oc][0] - 2.5, r + 0.5, P[oc][1] - 2.5];
+              climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[tc][0] - P[oc][0], 0, P[tc][1] - P[oc][1])).normalize();
+              tip = 0; climbHold = 0;
+              if(!climbedOnce){ climbedOnce = true; showMsg("a single block. you step up."); }
+            }
           }
         } else climbHold = 0;
       } else climbHold = 0;
@@ -1426,7 +1451,15 @@ function frame(now){
     }
   }
 
-  if(climbA > 0){
+  if(stepUpKey !== null){                                  // (#3) STEP-ROLL render: roll the cube 180° up & over the step's top edge, by the input-driven progress (same look as a normal roll, no canned timing)
+    rotLag *= Math.pow(1e-4, dt / 0.32); if(Math.abs(rotLag) < 1e-4) rotLag = 0;
+    const sp = Math.max(0, Math.min(1, stepUp));
+    const qv = new THREE.Quaternion().setFromAxisAngle(climbAxis, sp * Math.PI);
+    const vv = new THREE.Vector3(climbFrom[0] - climbPivot[0], climbFrom[1] - climbPivot[1], climbFrom[2] - climbPivot[2]).applyQuaternion(qv);
+    hero.position.set(climbPivot[0] + vv.x, climbPivot[1] + vv.y, climbPivot[2] + vv.z);
+    hero.quaternion.copy(qv);
+    hero.scale.set(0.92 + squash * 0.5, 0.92 - squash * 0.8, 0.92 + squash * 0.5);
+  } else if(climbA > 0){
     climbA = Math.max(0, climbA - dt);
     const e2 = 1 - climbA / CLIMB_DUR;
     const ee2 = e2 < 0.5 ? 2 * e2 * e2 : 1 - Math.pow(-2 * e2 + 2, 2) / 2;
@@ -1528,7 +1561,7 @@ function frame(now){
 
   const leadT = (mode === 'air' && vy > 2) ? Math.min(3.5, vy * 0.3) : 0;
   camLead += (leadT - camLead) * Math.min(1, dt * 5);
-  const camTargetY = (climbA > 0 || clAnim > 0 || clVaultTop) ? hero.position.y - 0.5 : heroY;   // (#4) during a vault / corner-swing follow the cube's SMOOTH rendered height, not the one-frame heroY jump -> no hard snap when climbing over a cube from a sticky wall
+  const camTargetY = (climbA > 0 || clAnim > 0 || clVaultTop || stepUpKey !== null) ? hero.position.y - 0.5 : heroY;   // (#4) during a vault / corner-swing / step-roll follow the cube's SMOOTH rendered height, not the one-frame heroY jump -> no hard snap when climbing over a cube
   camFocusY += (camTargetY - camFocusY) * Math.min(1, dt * 8);                     // smoothed focus so cling-wrap heroY jumps don't snap the camera
   const onO = (mode === 'cling' && clFace === 'O');
   clCamPull += ((onO ? 1 : 0) - clCamPull) * Math.min(1, dt * 3);             // smooth ease in/out on outer faces
