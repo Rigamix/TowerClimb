@@ -917,7 +917,10 @@ function frame(now){
   if(!carrier && !(mode === 'cling' && clFace && !clTang(clFace)) && stepUpKey === null){   // a step-roll (like a vertical cling) consumes input as climb-progress, not tower spin — skip the chase
     const lagD = rotTarget - rot;
     if(Math.abs(lagD) > 1e-5){
-      const vel = Math.sign(lagD) * Math.min(Math.abs(lagD) * CHASE_K, ROTMAX);
+      const r0c = Math.floor(heroY + 0.02) - 1;                                              // (#1) a roll toward a step-DOWN / drop felt ~15% faster than the rate-limited step-roll UP — cap it 15% slower so going up & down the same block match
+      const stepDown = mode === 'ground' && (lagD < 0 ? (canEnter(K + 1) && !solid(K + 1, r0c)) : (canEnter(K - 1) && !solid(K - 1, r0c)));
+      const velCap = stepDown ? ROTMAX * 0.85 : ROTMAX;
+      const vel = Math.sign(lagD) * Math.min(Math.abs(lagD) * CHASE_K, velCap);
       const want = rot + vel * dt;
       setRot(want);
       if(Math.abs(rot - want) > 1e-9){ rotTarget = rot; omega = 0; airCarry = 0; }
@@ -1022,6 +1025,8 @@ function frame(now){
           if(carrier === M){
             ridingNow = true;
             heroY = M.row + 1; vy = 0; mode = 'ground'; rot = -angOf(K); rotTarget = rot;   // carried up/down, standing upright on top
+            const csHead = Math.floor(heroY + 0.999);                                       // (#2) the lift carries you UP with vy=0, so the air rising-spike check (vy<0 branch) never runs — re-check it here: die if the lift raises your head into a ceiling-spike cone
+            if(cspikes.has(Kk(col(), csHead)) && heroY + 1 >= csHead + 0.5 && spikeLean() < SPIKE_LEAN) die("the ceiling spikes.");
             M.rideT += dt;
             const ph = M.rideT < 2 ? 'happy' : (M.rideT < 3.5 ? 'neutral' : 'frown');
             if(ph !== M.phase){ M.phase = ph; for(const fg of M.faces) setMouth(fg, ph); }
@@ -1336,7 +1341,7 @@ function frame(now){
     } else {
       const r0 = Math.floor(ny + 0.02);
       for(const M of MONSTERS){
-        if(M.state !== 'alive' || (M.vert && M.type !== 'mount')) continue;   // vertical spiky/normal are deadly on contact (handled in the patrol); a vertical MOUNT is a lift you land on
+        if(M.state !== 'alive' || (M.vert && M.type === 'spiky')) continue;   // vertical SPIKY stays deadly on contact (handled in the patrol); a vertical NORMAL freezes when stomped from above (like the ground stomp); a vertical MOUNT is a lift you land on
         const d = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
         if(d < 0.6 && ny <= M.row + 1.08 && ny > M.row + 0.25 && vy > 2){
           if(M.type === 'spiky'){ heroY = M.row + 1; die("its top is teeth too."); break; }
@@ -1347,7 +1352,7 @@ function frame(now){
             if(M.rideT === 0) showMsg("it doesn't mind. for now.");
             continue;
           }
-          M.state = 'frozen'; M.c = mod(Math.round(M.c)); M.thawT = 6;
+          M.state = 'frozen'; M.c = mod(Math.round(M.c)); if(M.vert) M.row = Math.round(M.row); M.thawT = 6;   // a vertical mob freezes at an integer row -> a clean solid platform (and the thaw's solidSet key matches)
           const under = Kk(M.c, M.row - 1);
           if(crackedSet.has(under)){
             crackedSet.delete(under); solidSet.delete(under); removeCell(under);
