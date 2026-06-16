@@ -1112,7 +1112,9 @@ function frame(now){
         else sandTimers.set(k, nt);
       }
     }
-    const ss = (mode === 'ground') ? Kk(col(), Math.floor(heroY + 0.02) - 1) : null;
+    const _eda = (-rot) - angOf(K), _er0 = Math.floor(heroY + 0.02) - 1;   // (#3) you're LEAVING the sand when step-rolling UP, or teetering toward a DROP (going down) -> stop crumbling it under you mid-motion (it resets, like a normal step-off, so it can't vanish and drop you)
+    const _leavingSand = stepUpKey !== null || (_eda > 0.001 && canEnter(K + 1) && !solid(K + 1, _er0)) || (_eda < -0.001 && canEnter(K - 1) && !solid(K - 1, _er0));
+    const ss = (mode === 'ground' && !_leavingSand) ? Kk(col(), Math.floor(heroY + 0.02) - 1) : null;
     const cur = (ss !== null && sandSet.has(ss)) ? ss : null;
     if(cur !== sandKey){                                          // moved on/off a sand block -> restore the one we left, start the new one from 0
       if(sandKey){ const om = sandMeshes.find(x => x.key === sandKey); if(om){ om.m.visible = true; om.m.scale.set(1, 1, 1); } }
@@ -1159,7 +1161,7 @@ function frame(now){
       if(carrier !== Mu){ carrier = Mu; rideSteer = 0; Mu.c = col(); Mu.lastCell = col(); }   // fresh bind
     }
     else if(carrier && carrier.vert && carrier.type === 'mount' && carrier.state === 'alive' && Math.abs(((col() - carrier.c + N / 2) % N + N) % N - N / 2) < 0.7){ /* (#1) riding the vertical lift: the mob loop keeps us on top each frame -> don't drop to air here */ }
-    else if(!solid(col(), sup)){ mode = 'air'; vy = 0; carrier = null; }   // (sand crumble/blink/reset handled above)
+    else if(!solid(col(), sup) && stepUpKey === null){ mode = 'air'; vy = 0; carrier = null; }   // (sand crumble/blink/reset handled above) — never drop to air mid step-roll; the step-roll owns the motion
     // the chest: push against it with the key
     if(mode === 'ground'){
       if(lockMsgCd > 0) lockMsgCd -= dt;
