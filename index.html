@@ -610,12 +610,12 @@ function openCountDoor(){
 let rot = 0, omega = 0, K = 2, heroY = 59, vy = 0, mode = 'ground', squash = 0, respawnT = 0, tip = 0, coinCount = 0, camLead = 0, keyCount = 0, lockMsgCd = 0, ridingNow = false;
 let climbHold = 0, climbDir = 0, climbedOnce = false, yLag = 0, rotLag = 0, wallC = 0, wallSide = 0;
 let climbA = 0, rotLagInit = 0, climbPivot = null, climbAxis = null, climbFrom = null;
-const CLIMB_DUR = 0.26;           // block-vault roll (#8: a bit slower so it eases instead of snapping)
+const CLIMB_DUR = 0.34;           // block-vault roll (#3: slower again so a step-up eases up smoothly instead of snapping)
 const CLING_TURN = 0.30;          // cling corner turns ease a touch slower than the block-vault, for smoothness
 // sticky cling: ONE mode that replaces wall+hang. clCell=the painted block [c,r], clFace=B/L/R/O/I,
 // clT=climb height, clSign=which push direction climbs UP (kept continuous across corners), clFacing=last move dir,
 // clGuard=brief no-regrab timer after letting go, clCamPull=eased camera dolly-back while on an outer (O) face.
-let clCell = null, clFace = null, clT = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clReleaseT = 1, clDropTarget = 0, clPivX = 0, clPivY = 0, clPivZ = 0, clVaultTop = false;
+let clCell = null, clFace = null, clT = 0, clVel = 0, clSign = 1, clFacing = 1, clGuard = 0, clCamPull = 0, clAnim = 0, clFromX = 0, clFromY = 0, clFromZ = 0, clAxisX = 0, clAxisY = 0, clAxisZ = 1, clDropT = 0, camFocusY = 59, clReleaseT = 1, clDropTarget = 0, clPivX = 0, clPivY = 0, clPivZ = 0, clVaultTop = false;
 let camCornerPull = 0;
 let sandKey = null, sandT = 0;   // the sand block currently being stood on + how long (resets when you step off)
 let padCombo = 0, padArmKey = null, padArmT = 0;   // jump-pad: consecutive-bounce counter (2,3,4,5 sq) + a settle timer so a fresh bounce waits until the bottom is flat
@@ -669,7 +669,7 @@ function placeAt(cTarget, standY){
 }
 function resetCommon(){
   airCarry = 0; carryT = 0; rotVel = 0; omega = 0; climbHold = 0; yLag = 0; rotLag = 0; climbA = 0; squash = 0; tip = 0; carrier = null; justLeft = null; jlTimer = 0;
-  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0; clVaultTop = false;   // never respawn mid-cling
+  clCell = null; clFace = null; clGuard = 0; clCamPull = 0; clVel = 0; padCombo = 0; padArmKey = null; sandKey = null; sandT = 0; clVaultTop = false;   // never respawn mid-cling
   keyCount = 0; r1CoinsLeft = 4; crackCreaked = false;
   hero.material.color.setHex(HERO_COL); hero.material.emissive.setHex(0x1c73eb); clearDeathParts(); deathBurstT = 0;   // restore the hero (body + blue outline) after a death burst
 }
@@ -720,6 +720,10 @@ function setRot(target){
   }
   rot = target;
 }
+// (#2 spikes) normalized roll position over column K: 0 = squarely over the spikes, ->1 = tipped onto a neighbour.
+// Used to gate spike deaths to roughly the visible cone footprint (don't die when only the cube's edge grazes the column).
+function spikeLean(){ const hR = midOf(K) - angOf(K), hL = angOf(K) - midOf(K - 1), da = (-rot) - angOf(K); return Math.abs(da >= 0 ? da / (2 * hR) : da / (2 * hL)); }
+const SPIKE_LEAN = 0.32;   // horizontal gate; SPIKE_TIP = how far the cube must penetrate the cell to reach the visible cone tip
 
 // --- input ---
 let ptr = null, lastX = 0, lastT = 0, dragVel = 0, lastDrag = -1e9;
@@ -805,7 +809,8 @@ function clAttach(bc, br, F, sign){
   vy = 0; tip = 0; climbHold = 0; airCarry = 0; omega = 0;
   let d = ((clHeroCol(bc, F) - col()) % N + N) % N; if(d > N / 2) d -= N; K += d;   // center the hero's column
   if(F === 'B') heroY = br - 1;                       // ceiling: hang just under the block
-  clT = heroY; clAnim = 0; rot = -angOf(K); rotTarget = rot;
+  else if(!clTang(F)) heroY = br;                     // (#5) L/R/O/I: align feet to the grabbed block so the clung pose is UPRIGHT (never a diagonal mid-roll rest) and flush with the wall
+  clT = heroY; clVel = 0; clAnim = 0; rot = -angOf(K); rotTarget = rot;
   squash = Math.max(squash, 0.12);
 }
 function clDetach(why){
@@ -964,12 +969,28 @@ function frame(now){
   for(const M of MONSTERS){
     if(mode === 'dead') break;
     if(M.state === 'alive'){
-      if(M.vert){                                                                 // VERTICAL mob: patrol up/down its column; deadly on contact in ANY mode (not ridable/stompable)
+      if(M.vert){                                                                 // VERTICAL mob: patrol up/down its column
         const rr = Math.round(M.row);
         if(Math.abs(M.row - rr) < 0.03){ const nxt = rr + M.dir; if(solid(M.c, nxt) || nxt < 1 || nxt > 240){ M.row = rr; M.dir *= -1; } }
         M.row += M.dir * M.speed * dt;
         const dV = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
-        if(dV < 0.7 && spawnGuard <= 0 && heroY < M.row + 0.85 && heroY + 0.85 > M.row) die("the tenant.");
+        if(M.type === 'mount'){                                                    // (#1) a RIDEABLE vertical "lift": land on top to ride it up/down. Friendly off it; only riding too long (the frown) bites.
+          if(carrier === M){
+            ridingNow = true;
+            heroY = M.row + 1; vy = 0; mode = 'ground'; rot = -angOf(K); rotTarget = rot;   // carried up/down, standing upright on top
+            M.rideT += dt;
+            const ph = M.rideT < 2 ? 'happy' : (M.rideT < 3.5 ? 'neutral' : 'frown');
+            if(ph !== M.phase){ M.phase = ph; for(const fg of M.faces) setMouth(fg, ph); }
+            if(M.rideT >= 5) die("it turned.");
+            if(Math.abs(rideSteer) >= 1){                                          // a sideways nudge steps you off the lift
+              const sstep = rideSteer > 0 ? 1 : -1; rideSteer = 0; const hr = Math.floor(heroY + 0.02);
+              if(solid(mod(K + sstep), hr - 1) && !solid(mod(K + sstep), hr)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; heroY = hr; vy = 0; squash = 0.12; rot = -angOf(K); rotTarget = rot; }   // a block level beside the lift -> roll onto it
+              else if(canEnter(K + sstep)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; mode = 'air'; vy = -2; }                       // open air -> hop off
+            }
+          } else if(M.rideT !== 0){ M.rideT = 0; M.phase = 'happy'; for(const fg of M.faces) setMouth(fg, 'happy'); }   // stepped off -> the lift goes friendly again
+          continue;
+        }
+        if(dV < 0.7 && spawnGuard <= 0 && heroY < M.row + 0.85 && heroY + 0.85 > M.row) die("the tenant.");   // vertical spiky / normal: still deadly on contact
         continue;
       }
       const cc = Math.round(M.c);
@@ -1087,7 +1108,7 @@ function frame(now){
       else { if(padArmKey !== supKey){ padArmKey = supKey; padArmT = 0.09; } padArmT -= dt;
         if(padArmT <= 0){ vy = launch; mode = 'air'; squash = 0; padCombo = 1; padArmKey = null; showMsg("sproing."); } }  // fresh -> wait a beat (flat), then launch
     }
-    else if(spikes.has(Kk(col(), sup + 1))){ const _hR = midOf(K) - angOf(K), _hL = angOf(K) - midOf(K - 1), _da = (-rot) - angOf(K), _ln = _da >= 0 ? _da / (2 * _hR) : _da / (2 * _hL); if(Math.abs(_ln) < 0.32) die("the spikes."); }   // only die once the cube is actually OVER the spike column, not at the mid-roll boundary
+    else if(spikes.has(Kk(col(), sup + 1))){ if(spikeLean() < SPIKE_LEAN) die("the spikes."); }   // only die once the cube is actually OVER the spike column, not at the mid-roll boundary
     else if(doorSet.has(supKey)){
       if(keyCount > 0){
         doorSet.delete(supKey); keyCount--; hud();
@@ -1100,6 +1121,7 @@ function frame(now){
       const Mu = mountUnder(sup);
       if(carrier !== Mu){ carrier = Mu; rideSteer = 0; Mu.c = col(); Mu.lastCell = col(); }   // fresh bind
     }
+    else if(carrier && carrier.vert && carrier.type === 'mount' && carrier.state === 'alive' && Math.abs(((col() - carrier.c + N / 2) % N + N) % N - N / 2) < 0.7){ /* (#1) riding the vertical lift: the mob loop keeps us on top each frame -> don't drop to air here */ }
     else if(!solid(col(), sup)){ mode = 'air'; vy = 0; carrier = null; }   // (sand crumble/blink/reset handled above)
     // the chest: push against it with the key
     if(mode === 'ground'){
@@ -1134,14 +1156,14 @@ function frame(now){
         if(!climbable && faced(nc, r, wallF) && solid(nc, r) && clGuard <= 0){
           if(climbDir !== s){ climbDir = s; climbHold = 0; }
           climbHold += dt;
-          if(climbHold >= 0.1){
+          if(climbHold >= 0.14){
             clAttach(nc, r, wallF, -s); climbHold = 0;   // -s: keep holding the grab key => climb UP
             showMsg("the wall holds.");
           }
         } else if(climbable){
           if(climbDir !== s){ climbDir = s; climbHold = 0; }
           climbHold += dt;
-          if(climbHold >= 0.12){
+          if(climbHold >= 0.18){                          // (#3) a touch more deliberate so a tiny brush past a block doesn't pop you up
             const oc = mod(K), tc = mod(K + s);
             K += s; heroY = r + 1; vy = 0;
             rotLagInit = rot + angOf(K); rotLag = rotLagInit;  // world recenters on the vault's curve
@@ -1189,15 +1211,16 @@ function frame(now){
         const upLeft = (clFace === 'L' || clFace === 'O');                    // on these, the CCW direction climbs UP (a consistent walk around the block)
         const vF = clFace;                                                   // the wall face we're on (for the corner-roll edge geometry)
         let dir = 0;
-        if(steer > 0.004) dir = upLeft ? 1 : -1; else if(steer < -0.004) dir = upLeft ? -1 : 1;
+        if(steer > 0.012) dir = upLeft ? 1 : -1; else if(steer < -0.012) dir = upLeft ? -1 : 1;   // (#3) deadzone: a tiny finger twitch no longer starts the climb
         rotTarget = rot;                                                      // a wall never spins the tower
+        let climbVelTarget = 0;                                              // (#3) drive a smooth climb velocity (ramps in/out like the ground roll) instead of binary full-speed-or-stop -> no twitchy snap
         if(dir !== 0){
           const upWall = faced(bc, br + 1, clFace) && solid(bc, br + 1);      // the same wall continues one block up...
           const dnWall = faced(bc, br - 1, clFace) && solid(bc, br - 1);      // ...or down
           if(dir > 0){                                                        // pushing UP
-            if(upWall){ clT += CLING_SPD * dt; clFacing = 1; }                // climb the continuing wall (the block hand-off happens below)
+            if(upWall){ climbVelTarget = CLING_SPD; clFacing = 1; }           // climb the continuing wall (the block hand-off happens below)
             else {                                                            // reached the TOP of the wall -> act AT the corner, don't drift up into empty space
-              heroY = clT = br;                                               // sit at the aligned top so the roll/hop starts on the edge
+              heroY = clT = br; clVel = 0;                                    // sit at the aligned top so the roll/hop starts on the edge
               if(faced(bc, br, 'T')){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); showMsg("onto the top."); }   // sticky top -> wrap onto it
               else if(!solid(bc, br + 1)){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); clVaultTop = true; showMsg("over the top."); }   // item 1b: roll up & over onto the block's own (clear) top, then stand on it
               else clDetach('slip');                                          // nowhere to go -> let go
@@ -1206,23 +1229,27 @@ function frame(now){
             const feetR = Math.floor(heroY + 0.02), openCol = mod(2 * col() - bc);   // FLEXIBILITY: touching a regular block on the open side at your row counts as standing on it -> single-block vault, like the ground
             if(solid(openCol, feetR) && !solid(openCol, feetR + 1) && !solid(col(), feetR + 1) && !spikes.has(Kk(openCol, feetR + 1))){
               const oc = col(); let sgnc = openCol - oc; if(sgnc > N / 2) sgnc -= N; else if(sgnc < -N / 2) sgnc += N;
-              K += sgnc; heroY = feetR + 1; vy = 0; mode = 'ground'; clCell = null; clFace = null; clGuard = 0.2;
+              K += sgnc; heroY = feetR + 1; vy = 0; mode = 'ground'; clCell = null; clFace = null; clGuard = 0.2; clVel = 0;
               rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
               climbA = CLIMB_DUR;
               climbPivot = [(P[oc][0] + P[openCol][0]) / 2 - 2.5, feetR + 1, (P[oc][1] + P[openCol][1]) / 2 - 2.5];
               climbFrom = [P[oc][0] - 2.5, feetR + 0.5, P[oc][1] - 2.5];
               climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[openCol][0] - P[oc][0], 0, P[openCol][1] - P[oc][1])).normalize();
               tip = 0; showMsg("over the block.");
-            } else if(dnWall){ clT -= CLING_SPD * dt; clFacing = -1; }
+            } else if(dnWall){ climbVelTarget = -CLING_SPD; clFacing = -1; }
             else {                                                            // reached the BOTTOM of the wall
-              heroY = clT = br;
+              heroY = clT = br; clVel = 0;
               if(faced(bc, br, 'B')){ clFace = 'B'; heroY = clT = br - 1; clSnap(vF, 'B', bc, br); showMsg("under the ledge."); }   // sticky underside -> wrap under it
               else clDetach('slip');
             }
           }
-        } else {                                                              // not climbing -> settle to the nearest block so you never rest mid-tumble (halfway up a block)
-          const tgt = Math.round(clT);
-          if(Math.abs(clT - tgt) > 0.002) clT += (tgt - clT) * Math.min(1, dt * 12);
+        }
+        // (#3) ease the climb velocity toward its target, then advance -> smooth start AND stop instead of a hard snap
+        clVel += (climbVelTarget - clVel) * Math.min(1, dt * 9);
+        if(climbVelTarget === 0 && Math.abs(clVel) < 0.05) clVel = 0;
+        if(mode === 'cling' && !clVaultTop && clFace && !clTang(clFace)){     // still on a vertical wall (didn't vault / wrap / detach this frame)
+          if(Math.abs(clVel) > 1e-4) clT += clVel * dt;
+          if(climbVelTarget === 0 && clVel === 0){ const tgt = Math.round(clT); if(Math.abs(clT - tgt) > 0.002) clT += (tgt - clT) * Math.min(1, dt * 10); }   // not climbing -> settle to the nearest block so you never rest mid-tumble (halfway up a block)
         }
         if(mode === 'cling'){
           heroY = clT;
@@ -1254,7 +1281,7 @@ function frame(now){
     if(vy < 0){
       const head = Math.floor(ny + 0.999);
       const prevHead = Math.floor(heroY + 0.999);
-      if(cspikes.has(Kk(col(), head)) && head !== prevHead){ die("the ceiling spikes."); ny = head; }   // rose into down-pointing spikes
+      if(cspikes.has(Kk(col(), head)) && ny + 1 >= head + 0.5 && spikeLean() < SPIKE_LEAN){ die("the ceiling spikes."); ny = head; }   // (#2) only lethal once the cube's TOP reaches the visible down-cone tip (~mid-cell), not the instant it touches the cell edge
       else if(solid(col(), head)){
         if(faced(col(), head, 'B') && head !== prevHead && clGuard <= 0){ heroY = head - 1; clAttach(col(), head, 'B', Math.sign(rotVel) || 1); ny = head - 1; squash = 0.14; showMsg("stuck. the ceiling holds you."); }
         else if((faced(col(), head, 'O') || faced(col(), head, 'I')) && clGuard <= 0){ const FF = faced(col(), head, 'O') ? 'O' : 'I'; heroY = head; clAttach(col(), head, FF, 1); ny = head; squash = 0.14; showMsg("stuck."); }   // jump up into a front/inner sticky face -> grab it
@@ -1263,13 +1290,14 @@ function frame(now){
     } else {
       const r0 = Math.floor(ny + 0.02);
       for(const M of MONSTERS){
-        if(M.state !== 'alive' || M.vert) continue;   // vertical mobs are deadly on contact (handled in the patrol) — not stompable
+        if(M.state !== 'alive' || (M.vert && M.type !== 'mount')) continue;   // vertical spiky/normal are deadly on contact (handled in the patrol); a vertical MOUNT is a lift you land on
         const d = Math.abs(((col() - M.c + N / 2) % N + N) % N - N / 2);
         if(d < 0.6 && ny <= M.row + 1.08 && ny > M.row + 0.25 && vy > 2){
           if(M.type === 'spiky'){ heroY = M.row + 1; die("its top is teeth too."); break; }
           if(M.type === 'mount'){
             if(M.phase === 'frown'){ heroY = M.row + 1; die("it stopped smiling."); break; }
             ny = M.row + 1; vy = 0; mode = 'ground'; squash = 0.16; airCarry = 0;
+            if(M.vert){ carrier = M; rideSteer = 0; rot = -angOf(K); rotTarget = rot; }   // (#1) vertical lift: bind directly (mountUnder won't, since the lift's row is fractional)
             if(M.rideT === 0) showMsg("it doesn't mind. for now.");
             continue;
           }
@@ -1293,7 +1321,7 @@ function frame(now){
       }
       if(mode === 'air'){
         const ck = Kk(col(), r0);
-        if(spikes.has(Kk(col(), r0 + 1)) && ny <= r0 + 1.05){
+        if(spikes.has(Kk(col(), r0 + 1)) && ny <= r0 + 1.05 && spikeLean() < SPIKE_LEAN){   // (#2) + horizontal gate: landing at the rim of the column (not over the spikes) is survivable
           die("the spikes."); heroY = r0 + 1;
         } else if(crackedSet.has(ck) && vy >= CRACK_V){
           crackedSet.delete(ck); solidSet.delete(ck); removeCell(ck);
@@ -1320,9 +1348,8 @@ function frame(now){
       for(const s of [1, -1]){
         if(!(s > 0 ? (steer < -0.01) : (steer > 0.01))) continue;
         const nc = mod(col() + s), F = s > 0 ? 'L' : 'R';
-        for(const rc of [Math.floor(heroY + 0.02), Math.floor(heroY + 0.5), Math.floor(heroY + 0.95)]){
-          if(solid(nc, rc) && faced(nc, rc, F) && !solid(col(), rc)){ clAttach(nc, rc, F, -s); break; }   // -s: keep pushing into the wall => climb UP
-        }
+        const rc = Math.floor(heroY + 0.02);   // (#5) grab ONLY at the feet row -> a wall flush beside you, never one above your head (that left you stuck diagonally beside a spike); and never grab into your own spike cell
+        if(solid(nc, rc) && faced(nc, rc, F) && !solid(col(), rc) && !spikes.has(Kk(col(), rc))) clAttach(nc, rc, F, -s);   // -s: keep pushing into the wall => climb UP
         if(mode === 'cling') break;
       }
     }
@@ -1498,7 +1525,8 @@ function frame(now){
 
   const leadT = (mode === 'air' && vy > 2) ? Math.min(3.5, vy * 0.3) : 0;
   camLead += (leadT - camLead) * Math.min(1, dt * 5);
-  camFocusY += (heroY - camFocusY) * Math.min(1, dt * 8);                     // smoothed focus so cling-wrap heroY jumps don't snap the camera
+  const camTargetY = (climbA > 0 || clAnim > 0 || clVaultTop) ? hero.position.y - 0.5 : heroY;   // (#4) during a vault / corner-swing follow the cube's SMOOTH rendered height, not the one-frame heroY jump -> no hard snap when climbing over a cube from a sticky wall
+  camFocusY += (camTargetY - camFocusY) * Math.min(1, dt * 8);                     // smoothed focus so cling-wrap heroY jumps don't snap the camera
   const onO = (mode === 'cling' && clFace === 'O');
   clCamPull += ((onO ? 1 : 0) - clCamPull) * Math.min(1, dt * 3);             // smooth ease in/out on outer faces
   const cornerDist = Math.min(...[0, 5, 10, 15].map(c => Math.abs(((col() - c + 10) % 20 + 20) % 20 - 10)));   // columns to the nearest tower corner
