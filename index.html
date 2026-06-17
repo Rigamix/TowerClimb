@@ -1038,7 +1038,14 @@ function frame(now){
       let g = 0;                                                                      // step K so the hero's logical column tracks the world spot the carry drifted them to
       if(B.dir > 0){ while(g++ < 4 && -rot >= midOf(K)){ if(canEnter(K + 1)) K += 1; else { rot = -(midOf(K) - 1e-6); rotTarget = rot; break; } } }
       else { while(g++ < 4 && -rot < midOf(K - 1)){ if(canEnter(K - 1)) K -= 1; else { rot = -(midOf(K - 1) + 1e-6); rotTarget = rot; break; } } }
+      if(!driving && Math.abs(omega) <= 0.6){                                         // (#band) SETTLE upright: when not actively walking, ease toward the nearest band-block CENTRE (the blocks sit at off+integer, so landing/stopping leaves a fractional band-local offset that would otherwise read as a persistent TILT)
+        const ds = (-rot) - angOf(K), bf = K + (ds >= 0 ? ds / (2 * (midOf(K) - angOf(K))) : ds / (2 * (angOf(K) - midOf(K - 1))));
+        const tA = angAt(B.off + Math.round(bf - B.off));
+        rot += (-tA - rot) * Math.min(1, dt * 12); rotTarget = rot;
+      }
     }
+    // (#band) COLLISION: if a band block has slid INTO the hero's body (you're standing in its path), shove you along the platform's direction instead of passing through
+    if(mode !== 'dead'){ let gs = 0; while(gs++ < 4 && rows().some(r => r >= B.r0 && r <= B.r1) && !canEnter(K)){ K += B.dir; rot = -angOf(K); rotTarget = rot; } }
   }
 
   // the tenant: patrol, contact, thaw
@@ -1166,6 +1173,7 @@ function frame(now){
 
   if(mode === 'ground'){
     const sup = Math.floor(heroY + 0.02) - 1;
+    { const head = Math.floor(heroY + 0.999); if(cspikes.has(Kk(col(), head)) && heroY + 1 >= head + 0.5 && spikeLean() < SPIKE_LEAN) die("the ceiling spikes."); }   // (#2) head pushed UP into a ceiling-spike cone while on the GROUND / carried by a platform -> die (the air rising-check only runs in the vy<0 branch, so walking/riding under one never bit)
     if(carrier && solid(col(), sup)){ carrier = null; rideFrac = null; rideSteer = 0; }   // stepped onto solid floor: stop riding
     const supKey = Kk(col(), sup);
     if(!pads.has(supKey)){ padCombo = 0; padArmKey = null; }      // standing on anything that isn't a pad resets the bounce combo
