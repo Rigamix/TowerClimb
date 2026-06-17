@@ -297,7 +297,7 @@ let solidSet, pads, sticky, wallSticky, faceSet, sandSet, sandTimers, spikes, cs
 let cubeList, coinMeshes, keyMeshes, bandCubes, spikeMeshes, sandMeshes, chestMeshes, doorMeshes, countDoorMeshes;
 function solid(c, r){
   if(r < 0) return true;
-  for(const B of BANDS) if(r >= B.r0 && r <= B.r1) return B.set.has(Kk(c - B.off, r));
+  for(const B of BANDS) if(r >= B.r0 && r <= B.r1) return B.set.has(Kk(Math.round(c - B.off), r));   // off is a continuous float now — the nearest band-local cell decides solidity
   return solidSet.has(Kk(c, r)) || chestSet.has(Kk(c, r)) || doorSet.has(Kk(c, r)) || countDoorSet.has(Kk(c, r));
 }
 function faced(c, r, F){ return faceSet.has(Kk(c, r) + ',' + F); }   // single-sided sticky test (the painted face exists here)
@@ -325,7 +325,8 @@ function loadCustom(){
 }
 function mkMon(c, wr, type, vert){ return { row: wr, c, dir: 1, speed: 1.6, state: 'alive', thawT: 0, grp: null, bodyMat: null, type, vert: !!vert, phase: 'happy', rideT: 0, lastCell: c, faces: null }; }
 function populateCustom(){
-  BANDS = [];   // editor levels have no moving platforms
+  BANDS = [];
+  const bandRows = {};   // (#band) self-moving floors: a row with '>' / '<' cells becomes one continuous moving platform
   const { body, rows, BASE, dividers } = CUSTOM;
   const bandFloors = [0]; for(const d of dividers) if(d > 0 && d < rows) bandFloors.push(d);   // editor floor row of each level band
   const floorForRow = lr => { let f = 0; for(const d of bandFloors) if(d <= lr) f = d; return f; };
@@ -356,9 +357,11 @@ function populateCustom(){
         case 'X': MONSTERS.push(mkMon(c, wr, 'spiky', true)); break;    // vertical-patrol variants (same archetypes, move up/down)
         case 'W': MONSTERS.push(mkMon(c, wr, 'normal', true)); break;
         case 'Y': MONSTERS.push(mkMon(c, wr, 'mount', true)); break;
+        case '>': case '<': { const b = bandRows[wr] || (bandRows[wr] = { dir: ch === '>' ? 1 : -1, set: new Set() }); b.dir = ch === '>' ? 1 : -1; b.set.add(Kk(c, wr)); break; }   // (#band) moving-floor cell; '>' right, '<' left — all cells in a row form ONE band
       }
     }
   }
+  for(const wr in bandRows){ const b = bandRows[wr]; BANDS.push({ r0: +wr, r1: +wr, off: 0, dir: b.dir, speed: 0.8, set: b.set }); }   // (#band) one continuous band per row painted with > / <
   for(const sl of (CUSTOM.stickLines || [])){   // per-face sticky → the editor painted these EXACT faces (single-sided)
     const mm = sl.trim().match(/^(\d+),(\d+)\s+([TBLROI]+)$/); if(!mm) continue;
     const c = +mm[1], wr = (+mm[2]) + BASE, f = mm[3];
@@ -386,9 +389,9 @@ function buildWorld(){
   const ROOMTOP = { R2:52,R3:46,R4:35,R5:29,R6:22 }, ROOMFLOOR = { R2:46,R3:35,R4:29,R5:22,R6:14 };
   const floorOf = n => ROOMFLOOR[n], topOf = n => ROOMTOP[n];
   BANDS = [
-    { r0: 39, r1: 39, off: 0, t: 0, period: 1.15, stepDur: 0.32, anim: 0, dir: 1,  set: new Set() },
-    { r0: 19, r1: 19, off: 0, t: 0, period: 2.1, stepDur: 0.32, anim: 0, dir: -1, set: new Set() },
-    { r0: 17, r1: 17, off: 0, t: 0, period: 1.4, stepDur: 0.32, anim: 0, dir: 1,  set: new Set() }
+    { r0: 39, r1: 39, off: 0, dir: 1,  speed: 0.9, set: new Set() },   // continuous moving floors (columns/sec); off is a float
+    { r0: 19, r1: 19, off: 0, dir: -1, speed: 0.5, set: new Set() },
+    { r0: 17, r1: 17, off: 0, dir: 1,  speed: 0.7, set: new Set() }
   ];
   const fill = (c, r) => solidSet.add(Kk(c, r));
   const wall = (c, r, h2) => { for(let i = 0; i < h2; i++) fill(c, r + i); };
@@ -609,7 +612,7 @@ function openCountDoor(){
 }
 
 // --- run state ---
-let rot = 0, omega = 0, K = 2, heroY = 59, vy = 0, mode = 'ground', squash = 0, respawnT = 0, tip = 0, coinCount = 0, camLead = 0, keyCount = 0, lockMsgCd = 0, ridingNow = false;
+let rot = 0, omega = 0, K = 2, heroY = 59, vy = 0, mode = 'ground', squash = 0, respawnT = 0, tip = 0, coinCount = 0, camLead = 0, keyCount = 0, lockMsgCd = 0, ridingNow = false, onBand = false;
 let climbHold = 0, climbDir = 0, climbedOnce = false, yLag = 0, rotLag = 0, wallC = 0, wallSide = 0;
 let climbA = 0, rotLagInit = 0, climbPivot = null, climbAxis = null, climbFrom = null;
 let stepUpKey = null, stepUp = 0, stepUpNC = 0, stepUpR = 0, stepUpS = 0, stepUpGlide = 0, stepUpAtTop = false;   // (#3) step-roll: climbing onto a block / frozen mob as a continuous, swipe-DRIVEN roll (same chase as a normal roll), replacing the canned climbA vault for ground step-ups. stepUpGlide = the tower-rotation amount to ease across the roll so the view recenters on the new column WITHOUT a snap at the top; stepUpAtTop = render one frame at the exact top before committing so the cube doesn't bump.
@@ -953,7 +956,7 @@ function frame(now){
       if(Math.abs(rot - want) > 1e-9){ rotTarget = rot; omega = 0; airCarry = 0; }
     }
   }
-  if(!driving && !carrier && Math.abs(omega) <= 0.6 && carryT <= 0 && !ridingNow && mode !== 'cling' && stepUpKey === null){
+  if(!driving && !carrier && !onBand && Math.abs(omega) <= 0.6 && carryT <= 0 && !ridingNow && mode !== 'cling' && stepUpKey === null){
     omega = 0;
     const hL = angOf(K) - midOf(K - 1), hR = midOf(K) - angOf(K);
     const da = (-rot) - angOf(K);
@@ -999,42 +1002,29 @@ function frame(now){
     } else if(stepUp <= 0){ stepUpKey = null; stepUp = 0; stepUpAtTop = false; rotLag = 0; }   // rolled fully back down -> cancel, stay on the lower floor
   }
 
-  // bands step on their own clocks, in their own directions
+  // (#band) CONTINUOUS moving floors — advance smoothly every frame (no discrete stepping). A grounded rider on top
+  // (or a B-cling hanger under a sticky-bottom band) is CARRIED with the platform, upright like a mount, and can still
+  // roll/walk on top like normal ground (the chase owns the relative roll; the carry just drifts the whole frame).
+  onBand = false;
   for(const B of BANDS){
-    B.t += dt;
-    if(B.anim > 0) B.anim = Math.max(0, B.anim - dt);
-    if(B.t >= B.period){
-      B.t = 0;
-      // a grounded rider on top, or a hanger on a sticky underside, goes with the platform
-      let ride = false;
-      if(mode === 'ground'){
-        const sup = Math.floor(heroY + 0.02) - 1;
-        if(sup >= B.r0 && sup <= B.r1 && B.set.has(Kk(col() - B.off, sup))) ride = true;
-      } else if(mode === 'cling' && clFace === 'B'){
-        const hr = clCell ? clCell[1] : Math.floor(heroY + 0.999);
-        if(hr >= B.r0 && hr <= B.r1 && B.bottomSticky && B.set.has(Kk(col() - B.off, hr))) ride = true;
-      }
-      B.off += B.dir; B.anim = B.stepDur;
-      if(ride && canEnter(K + B.dir)){
-        const d0 = angOf(K + B.dir) - angOf(K);
-        K += B.dir;
-        rot -= d0; rotTarget -= d0; rotLag += d0;   // commit the ride; the view glides after it
-      }
-      for(let g = 0; g < 3; g++){
-        if(mode !== 'dead' && rows().some(r => r >= B.r0 && r <= B.r1) && !canEnter(K)){ K += B.dir; rot = -angOf(K); rotTarget = rot; }
-        else break;
-      }
+    const doff = B.dir * B.speed * dt;
+    B.off += doff;
+    let ride = false;
+    if(mode === 'ground'){
+      const sup = Math.floor(heroY + 0.02) - 1;
+      if(sup >= B.r0 && sup <= B.r1 && B.set.has(Kk(Math.round(col() - B.off), sup))) ride = true;
+    } else if(mode === 'cling' && clFace === 'B' && B.bottomSticky){
+      const hr = clCell ? clCell[1] : Math.floor(heroY + 0.999);
+      if(hr >= B.r0 && hr <= B.r1 && B.set.has(Kk(Math.round(col() - B.off), hr))) ride = true;
     }
-  }
-  // ride tween: locked to the platform's ease, abandoned the moment the finger moves
-  if(carryT > 0){
-    if(ptr !== null && (now - lastDrag) < 110){ carryT = 0; }
-    else {
-      carryT = Math.max(0, carryT - dt);
-      const e = 1 - carryT / carryDur;
-      const ee = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
-      rot = carryFrom + (-angOf(K) - carryFrom) * ee;
-      rotTarget = rot;
+    if(ride){
+      onBand = true;
+      const w = B.dir > 0 ? (angOf(K + 1) - angOf(K)) : (angOf(K) - angOf(K - 1));   // angular width of one column in the travel direction
+      const dRot = -doff * w;                                                         // carry: shift the tower rotation by the platform's angular motion (so the hero glides WITH it)
+      rot += dRot; rotTarget += dRot;
+      let g = 0;                                                                      // step K so the hero's logical column tracks the world spot the carry drifted them to
+      if(B.dir > 0){ while(g++ < 4 && -rot >= midOf(K)){ if(canEnter(K + 1)) K += 1; else { rot = -(midOf(K) - 1e-6); rotTarget = rot; break; } } }
+      else { while(g++ < 4 && -rot < midOf(K - 1)){ if(canEnter(K - 1)) K -= 1; else { rot = -(midOf(K - 1) + 1e-6); rotTarget = rot; break; } } }
     }
   }
 
@@ -1295,7 +1285,7 @@ function frame(now){
             }
           } else {                                                            // pushing DOWN / toward the OPEN side (away from the wall)
             const feetR = Math.floor(heroY + 0.02), openCol = mod(2 * col() - bc);   // FLEXIBILITY: touching a regular block on the open side at your row counts as standing on it -> single-block vault, like the ground
-            if(solid(openCol, feetR) && !solid(openCol, feetR + 1) && !solid(col(), feetR + 1) && !spikes.has(Kk(openCol, feetR + 1))){
+            if((clFace === 'L' || clFace === 'R') && solid(openCol, feetR) && !solid(openCol, feetR + 1) && !solid(col(), feetR + 1) && !spikes.has(Kk(openCol, feetR + 1))){   // (#3a) ONLY L/R faces have a tangential "open side" (a real neighbour column). For O/I, openCol = the block's OWN column -> a bogus snap-onto-self; skip the vault there.
               const oc = col(); let sgnc = openCol - oc; if(sgnc > N / 2) sgnc -= N; else if(sgnc < -N / 2) sgnc += N;
               K += sgnc; heroY = feetR + 1; vy = 0; mode = 'ground'; clCell = null; clFace = null; clGuard = 0.2;
               rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
@@ -1317,8 +1307,9 @@ function frame(now){
         }
         if(mode === 'cling'){
           heroY = clT;
-          const feet = Math.floor(heroY + 0.02);
-          if(spikes.has(Kk(col(), feet)) && !cspikes.has(Kk(col(), feet))){ die("the spikes."); }   // FLOOR spike only (ceiling-spike cells handled by the rising check)
+          const feet = Math.floor(heroY + 0.02), head = Math.floor(heroY + 0.999);
+          if(cspikes.has(Kk(col(), head)) && heroY + 1 >= head + 0.5 && spikeLean() < SPIKE_LEAN){ die("the ceiling spikes."); }   // (#7b) climbing UP a sticky wall into a ceiling-spike cone kills (was a hole: the cling raises heroY with vy=0, so the air rising-check never ran — mirrors the air / vertical-lift checks)
+          else if(spikes.has(Kk(col(), feet)) && !cspikes.has(Kk(col(), feet))){ die("the spikes."); }   // FLOOR spike only (ceiling-spike cells handled by the rising check)
           else if(feet > br && faced(bc, br + 1, clFace) && solid(bc, br + 1)){ clCell = [bc, br + 1]; }   // climbed up onto the next wall block
           else if(feet < br && faced(bc, br - 1, clFace) && solid(bc, br - 1)){ clCell = [bc, br - 1]; }   // climbed down onto the next
         }
@@ -1437,10 +1428,8 @@ function frame(now){
   // render
   tower.rotation.y = rot + rotLag;
   for(const b of bandCubes){
-    const di = b.c + b.B.off, [x1, z1] = P[mod(di)], [x0, z0] = P[mod(di - b.B.dir)];
-    const e = b.B.anim > 0 ? 1 - (b.B.anim / b.B.stepDur) : 1;
-    const ee = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2;
-    b.m.position.set((x0 + (x1 - x0) * ee) - 2.5, b.r + 0.5, (z0 + (z1 - z0) * ee) - 2.5);
+    const [x, z] = Pat(b.c + b.B.off);   // (#band) continuous world position — the platform slides smoothly with its float offset
+    b.m.position.set(x - 2.5, b.r + 0.5, z - 2.5);
   }
   for(const cm of coinMeshes) cm.m.rotation.y += dt * 2.2;
   for(const km of keyMeshes) km.m.rotation.y += dt * 1.6;
@@ -1560,7 +1549,8 @@ function frame(now){
   const hL2 = angOf(K) - midOf(K - 1), hR2 = midOf(K) - angOf(K);
   const erot = rot + rotLag;            // the angle actually shown this frame
   const da2 = (-erot) - angOf(K);
-  const g2 = (carryT > 0 || carrier) ? 0 : (da2 >= 0 ? Math.min(1, da2 / (2 * hR2)) : Math.max(-1, da2 / (2 * hL2)));   // visual roll follows clear to 90° at an edge (was clamped at 45° -> froze, then the physics snapped past it)
+  const bandUpright = onBand && !driving && Math.abs(rotTarget - rot) < 0.02;   // (#band) idle-carried on a moving floor -> render UPRIGHT (like a mount), so the smooth carry doesn't read as a lean; rolling on it still tumbles
+  const g2 = (carryT > 0 || carrier || bandUpright) ? 0 : (da2 >= 0 ? Math.min(1, da2 / (2 * hR2)) : Math.max(-1, da2 / (2 * hL2)));   // visual roll follows clear to 90° at an edge (was clamped at 45° -> froze, then the physics snapped past it)
   const sgn = g2 >= 0 ? 1 : -1;
   const c0 = (carrier && rideFrac !== null) ? Pat(rideFrac) : P[col()], c1 = P[mod(K + sgn)];
   const d3 = new THREE.Vector3(c1[0] - c0[0], 0, c1[1] - c0[1]);
