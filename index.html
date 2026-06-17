@@ -241,7 +241,7 @@ const heroFace = new THREE.Group();
 scene.add(heroFace);
 const _hw = new THREE.Vector3(), _hd = new THREE.Vector3();
 // #3: a subtle dashed guide showing where the hero will fall/land (a child of the tower so it rotates with the column)
-const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x6fc7ff, transparent: true, opacity: 0.5, dashSize: 0.28, gapSize: 0.22 }));   // landing guide (shown only when toggled on)
+const trajLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x1b2030, transparent: true, opacity: 0.8, dashSize: 0.28, gapSize: 0.22 }));   // landing guide (shown only when toggled on) — DARK so it reads on the cream/pink/yellow palette
 trajLine.frustumCulled = false; trajLine.visible = false; tower.add(trajLine);
 // #1: glow ONLY the top face of the block under the hero (a plate, not the whole cube)
 const glowPlate = new THREE.Mesh(plate, new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.5 }));
