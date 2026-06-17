@@ -15,6 +15,7 @@
   #flip.on{color:#ffd34d;border-color:#ffd34d;background:#3a3320aa;}
   #traj{position:fixed;bottom:24px;left:96px;color:#cfe0ff;font-size:13px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:8px 13px;cursor:pointer;}
   #traj.on{color:#ffd34d;border-color:#ffd34d;background:#3a3320aa;}
+  #warp{position:fixed;bottom:64px;right:14px;color:#cfe0ff;font-size:13px;background:#1f2940aa;border:1px solid #3a4a6a;border-radius:9px;padding:8px 13px;cursor:pointer;}
   #bigmsg{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);color:#ffd34d;font:700 27px/1.25 'Comic Sans MS','Chalkboard SE','Marker Felt',cursive;text-align:center;max-width:78vw;pointer-events:none;opacity:0;transition:opacity .25s;text-shadow:0 2px 10px #000c,0 0 3px #000;}
 </style>
 </head>
@@ -26,6 +27,7 @@
 <div id="redo">&#8635; room</div>
 <div id="flip">&#8644; flip</div>
 <div id="traj">&#10549; path</div>
+<div id="warp">&#8595; level</div>
 <div id="bigmsg"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>window.TOWER_LEVEL = {"code":"ROOM rows=64 width=20\n....................\n................o...\n................#...\nS....o..K...o......#\n#...........#.......\n#.o....#P####.##..##\n#.#D#^^...###.#...m#\n#^.....######P#^P###\n.#.......o.......X..\n.oSN................\n..............##....\n..^^###P.#..#N.o###.\n...###.#...#o.K.....\n..####.#o#.#........\nD#####.#.#o#..x.###P\nC####v##^####P######\n......######vo..X...\n.....o#vvvv.........\n....v.#.....o.......\n...#.o#K..........X.\nSN#...##....^...NNN#\nK....o##...##CP#...#\n@.#..Y##...#o.o#...#\n###P^####YP#.@.#^^^#\n......^##D###P##..#.\n...#.K...o####....#.\n...###v#..#..#....#.\n.o.#......####....#.\n...##.....#..#....#.\n...##..#.###.#....#.\n.x..#..#.....#....#.\n#########D####....SP\n......#.#..........#\n......#.#.#o.o....K#\n......#.#...#...####\n......#.#..ov#P#...#\n......#.#.#...v##..#\n......#.#.#...o.#..#\n......#.....@...#..#\n......###D#########S\n#......#..#.....####\n##.....#..#.#v^K....\n#......#..#....##...\n#.##...#..#o......##\n####...#..#.........\n#.##.#.#..#........o\n#x.#...#..#.........\n#######S..########DP\n..K#.o.####....#....\n..##......#....#....\n####.o...o#....#..##\n#.##......#....#..##\n#v.#......#....#..#.\n...#.#o.o.#....#..##\n..####..x.#....#....\n######P#S##....###D#\n##..^......^.......#\n...o#......#........\n.K..#......#......#.\nv#..#......#......#.\n.#..#......#......##\n.#.o#......#...#####\n.##.#......#.xo.....\n#####......S##P####D\nDIVIDERS 8,16,24,32,40,48,56\nSTICK\n11,49 L\n11,50 L\n11,51 L\n10,57 I\n11,57 B\n16,61 BLT\n12,47 R\n7,56 B\n8,56 B\n9,56 B\n7,42 R\n7,43 R\n9,50 L\n7,50 R","dividers":[8,16,24,32,40,48,56]};</script>
@@ -763,7 +765,7 @@ let tapT = 0, tapKind = '', tapTargetRot = 0, tapSteer = 0, tapMark = 0;
 const SENS = 0.0045;   // drag sensitivity
 let flipControls = false; try { flipControls = localStorage.getItem('tcFlip') === '1'; } catch(e){}   // on-screen toggle: invert ALL input so it feels like rotating the character, not the tower
 let trajOn = false; try { trajOn = localStorage.getItem('tcTraj') === '1'; } catch(e){}   // landing-guide toggle (OFF by default)
-window.addEventListener('pointerdown', e => { if(e.target.id === 'redo' || e.target.id === 'flip' || e.target.id === 'traj') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); downX = e.clientX; downT = lastT; tapMoved = false; tapT = 0; dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
+window.addEventListener('pointerdown', e => { if(e.target.id === 'redo' || e.target.id === 'flip' || e.target.id === 'traj' || e.target.id === 'warp') return; e.preventDefault(); ptr = e.pointerId; lastX = e.clientX; lastT = performance.now(); downX = e.clientX; downT = lastT; tapMoved = false; tapT = 0; dragVel = 0; omega = 0; rotTarget = rot; airCarry = 0; rideSteer = 0; });
 window.addEventListener('pointermove', e => {
   if(e.pointerId !== ptr) return;
   const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(8, now - lastT);
@@ -813,6 +815,16 @@ syncTraj();
 if(trajEl) trajEl.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation();
   trajOn = !trajOn; try { localStorage.setItem('tcTraj', trajOn ? '1' : '0'); } catch(err){} syncTraj();
 });
+function warpLevel(){   // PLAYTEST: each tap spawns you one checkpoint/level DOWN (wraps to the top after the bottom)
+  const n = CUSTOM ? CUSTOM.bands.length : (typeof ENTRIES !== 'undefined' ? ENTRIES.length : 0);
+  if(!n) return;
+  currentRoom = (currentRoom + 1) % n;
+  bankCoins = 0; wonRun = false; respawnT = 0;
+  resetRoom();                                        // rebuilds the level fresh + drops you at that checkpoint's entry
+  bigMsg("level " + (currentRoom + 1) + " / " + n);
+}
+const warpEl = document.getElementById('warp');
+if(warpEl) warpEl.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); warpLevel(); });
 const keys = {};
 addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key.toLowerCase() === 'r' && mode !== 'dead') die("you called it."); });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
