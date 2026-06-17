@@ -231,9 +231,9 @@ hero.material.onBeforeCompile = heroCompile; hero.material.customProgramCacheKey
 hero.material.emissive = new THREE.Color(0xefa315);   // (ART FORK) outline colour (amber — the hero-yellow nudged toward orange); die() flips it to red, resetCommon restores it
 // (ART FORK) the hero outline is drawn INSIDE the shape by heroCompile (inset edge band) — no hull, so it never pokes into the floor
 tower.add(hero);
-// (ART FORK) hero eyes — two LINE marks, billboarded to face the camera and ALWAYS drawn on top (never occluded)
+// (ART FORK) hero eyes — two round DOT marks, billboarded to face the camera and ALWAYS drawn on top (never occluded)
 const heroEyeMat = new THREE.MeshBasicMaterial({ color: 0x000000, depthTest: false, depthWrite: false });   // black eyes, always drawn above the outline
-const heroEyeGeo = new THREE.PlaneGeometry(0.038, 0.18);
+const heroEyeGeo = new THREE.CircleGeometry(0.055, 16);   // round dot (was a 0.038x0.18 tall plane = a line)
 const heroFace = new THREE.Group();
 { const eL = new THREE.Mesh(heroEyeGeo, heroEyeMat); eL.position.set(-0.13, 0.04, 0); eL.renderOrder = 999; const eR = new THREE.Mesh(heroEyeGeo, heroEyeMat); eR.position.set(0.13, 0.04, 0); eR.renderOrder = 999; heroFace.add(eL, eR); }
 scene.add(heroFace);
@@ -1034,9 +1034,9 @@ function frame(now){
             if(ph !== M.phase){ M.phase = ph; for(const fg of M.faces) setMouth(fg, ph); }
             if(M.rideT >= 5) die("it turned.");
             if(Math.abs(rideSteer) >= 2 * (midOf(K) - angOf(K))){                  // (#1) ONE block's swipe steps you off the lift (same finger travel as a ground roll)
-              const sstep = rideSteer > 0 ? 1 : -1; rideSteer = 0; const hr = Math.floor(heroY + 0.02);
-              if(solid(mod(K + sstep), hr - 1) && !solid(mod(K + sstep), hr)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; heroY = hr; vy = 0; squash = 0.12; rot = -angOf(K); rotTarget = rot; }   // a block level beside the lift -> roll onto it
-              else if(canEnter(K + sstep)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; mode = 'air'; vy = solid(K, hr + 1) ? 0 : -2; rotLag = rot + angOf(K); rot = -angOf(K); rotTarget = rot; }   // open air -> hop off: K AND rot move to the gap (glide via rotLag) so the chase doesn't drag you back over the lift; ceiling above -> drop in, don't bonk up
+              const sstep = rideSteer > 0 ? 1 : -1; rideSteer = 0; const hr = Math.round(heroY);   // (#1) SNAP to the row the lift is MOST at (was floor(heroY+0.02) — mid-square that misaligned with the side ledges, so the dismount kept failing and felt random/one-sided)
+              if(solid(mod(K + sstep), hr - 1) && !solid(mod(K + sstep), hr)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; heroY = hr; vy = 0; squash = 0.12; rotLag = rot + angOf(K); rot = -angOf(K); rotTarget = rot; }   // a block level beside the lift -> ROLL onto it (glide in the swipe direction, was a hard snap that read as the wrong way)
+              else if(canEnter(K + sstep)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; heroY = hr; mode = 'air'; vy = solid(K, hr + 1) ? 0 : -2; rotLag = rot + angOf(K); rot = -angOf(K); rotTarget = rot; }   // open air -> hop off: K AND rot move to the gap (glide via rotLag) so the chase doesn't drag you back over the lift; ceiling above -> drop in, don't bonk up
             }
           } else if(M.rideT !== 0){ M.rideT = 0; M.phase = 'happy'; for(const fg of M.faces) setMouth(fg, 'happy'); }   // stepped off -> the lift goes friendly again
           continue;
@@ -1057,6 +1057,7 @@ function frame(now){
         if(ridden){
           ridingNow = true;
           if(Math.abs(rideSteer) >= 2 * (midOf(K) - angOf(K))){   // (#1) ONE block's swipe to step off (matches the ground roll's finger travel; was a fixed >=1 that needed ~2x the swipe)
+            { const b = K - mod(K); let f = b + mod(M.c); if(f - K > N / 2) f -= N; else if(f - K < -N / 2) f += N; K = Math.round(f); rot = -angAt(f); rotTarget = rot; }   // (#1b) SNAP to the cell the mount is MOST in *this frame* — the column-sync below runs AFTER this block, so K could be a frame stale and land you a cell EARLY when the mount is mid-crossing. rot keeps the continuous visual position so the roll-off stays smooth.
             const sstep = rideSteer > 0 ? 1 : -1;
             rideSteer = 0;
             const nc = mod(K + sstep), hr = Math.floor(heroY + 0.02), F = sstep > 0 ? 'L' : 'R';   // hr = the hero's feet row (= the mount's row + 1)
