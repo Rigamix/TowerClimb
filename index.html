@@ -1293,7 +1293,7 @@ function frame(now){
               heroY = clT = br;                                               // sit at the aligned top so the roll/hop starts on the edge
               if(faced(bc, br, 'T')){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); showMsg("onto the top."); }   // sticky top -> wrap onto it
               else if(!solid(bc, br + 1)){ clFace = 'T'; heroY = clT = br + 1; let dd = ((bc - col()) % N + N) % N; if(dd > N / 2) dd -= N; K += dd; clSnap(vF, 'T', bc, br); clVaultTop = true; showMsg("over the top."); }   // item 1b: roll up & over onto the block's own (clear) top, then stand on it
-              else clDetach('slip');                                          // nowhere to go -> let go
+              else { heroY = clT = br; }                                      // a SOLID (non-sticky) block caps the wall -> you can't climb or vault past it, but you DON'T fall: HOLD clung at the top cube (was clDetach -> dropped you). Steer down/off to leave.
             }
           } else {                                                            // pushing DOWN / toward the OPEN side (away from the wall)
             const feetR = Math.floor(heroY + 0.02), openCol = mod(2 * col() - bc);   // FLEXIBILITY: touching a regular block on the open side at your row counts as standing on it -> single-block vault, like the ground
