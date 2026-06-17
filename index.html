@@ -614,7 +614,7 @@ function openCountDoor(){
 }
 
 // --- run state ---
-let rot = 0, omega = 0, K = 2, heroY = 59, vy = 0, mode = 'ground', squash = 0, respawnT = 0, tip = 0, coinCount = 0, camLead = 0, keyCount = 0, lockMsgCd = 0, ridingNow = false, onBand = false;
+let rot = 0, omega = 0, K = 2, heroY = 59, vy = 0, mode = 'ground', squash = 0, respawnT = 0, tip = 0, coinCount = 0, camLead = 0, keyCount = 0, lockMsgCd = 0, ridingNow = false, onBand = false, bandRef = null;
 let climbHold = 0, climbDir = 0, climbedOnce = false, yLag = 0, rotLag = 0, wallC = 0, wallSide = 0;
 let climbA = 0, rotLagInit = 0, climbPivot = null, climbAxis = null, climbFrom = null;
 let stepUpKey = null, stepUp = 0, stepUpNC = 0, stepUpR = 0, stepUpS = 0, stepUpGlide = 0, stepUpAtTop = false;   // (#3) step-roll: climbing onto a block / frozen mob as a continuous, swipe-DRIVEN roll (same chase as a normal roll), replacing the canned climbA vault for ground step-ups. stepUpGlide = the tower-rotation amount to ease across the roll so the view recenters on the new column WITHOUT a snap at the top; stepUpAtTop = render one frame at the exact top before committing so the cube doesn't bump.
@@ -1017,7 +1017,7 @@ function frame(now){
   // (#band) CONTINUOUS moving floors — advance smoothly every frame (no discrete stepping). A grounded rider on top
   // (or a B-cling hanger under a sticky-bottom band) is CARRIED with the platform, upright like a mount, and can still
   // roll/walk on top like normal ground (the chase owns the relative roll; the carry just drifts the whole frame).
-  onBand = false;
+  onBand = false; bandRef = null;
   for(const B of BANDS){
     const doff = B.dir * B.speed * dt;
     B.off += doff;
@@ -1030,9 +1030,10 @@ function frame(now){
       if(hr >= B.r0 && hr <= B.r1 && B.set.has(Kk(Math.round(col() - B.off), hr))) ride = true;
     }
     if(ride){
-      onBand = true;
-      const w = B.dir > 0 ? (angOf(K + 1) - angOf(K)) : (angOf(K) - angOf(K - 1));   // angular width of one column in the travel direction
-      const dRot = -doff * w;                                                         // carry: shift the tower rotation by the platform's angular motion (so the hero glides WITH it)
+      onBand = true; bandRef = B;
+      const da2c = (-rot) - angOf(K), hR2c = midOf(K) - angOf(K), hL2c = angOf(K) - midOf(K - 1);
+      const heroFrac = K + (da2c >= 0 ? da2c / (2 * hR2c) : da2c / (2 * hL2c));        // hero's CONTINUOUS world column (= the render's bandFrac); angAt(heroFrac) == -rot
+      const dRot = -(angAt(heroFrac + doff) - angAt(heroFrac));                        // carry: move the hero EXACTLY `doff` world-columns (angAt-based) so it cancels the render's band-local offset -> no residual tilt on the uneven ring
       rot += dRot; rotTarget += dRot;
       let g = 0;                                                                      // step K so the hero's logical column tracks the world spot the carry drifted them to
       if(B.dir > 0){ while(g++ < 4 && -rot >= midOf(K)){ if(canEnter(K + 1)) K += 1; else { rot = -(midOf(K) - 1e-6); rotTarget = rot; break; } } }
@@ -1561,10 +1562,19 @@ function frame(now){
   const hL2 = angOf(K) - midOf(K - 1), hR2 = midOf(K) - angOf(K);
   const erot = rot + rotLag;            // the angle actually shown this frame
   const da2 = (-erot) - angOf(K);
-  const g2 = (carryT > 0 || carrier || onBand) ? 0 : (da2 >= 0 ? Math.min(1, da2 / (2 * hR2)) : Math.max(-1, da2 / (2 * hL2)));   // UPRIGHT on a mount OR a moving band (the carry drifts rot; a lean would read as a tilt); rolling on normal ground still tumbles
+  const bandFrac = K + (da2 >= 0 ? da2 / (2 * hR2) : da2 / (2 * hL2));   // hero's CONTINUOUS world column
+  let g2, c0, c1;
+  if(onBand && bandRef){                                                // (#band) on a moving floor: the cube TUMBLES from your WALK relative to the band, while the CARRY just glides it (no tilt, no blink)
+    const lc = bandFrac - bandRef.off, bl0 = Math.round(lc);           // your continuous BAND-LOCAL column — the exact carry above keeps this constant while carried, so g2=0 (upright); walking changes it
+    g2 = Math.max(-1, Math.min(1, lc - bl0));                          // roll fraction vs the nearest band block
+    const s = g2 >= 0 ? 1 : -1;
+    c0 = Pat(bandRef.off + bl0); c1 = Pat(bandRef.off + bl0 + s);      // pivot edge = the band BLOCK edge, moving WITH the platform (so the roll rides along)
+  } else {
+    g2 = (carryT > 0 || carrier) ? 0 : (da2 >= 0 ? Math.min(1, da2 / (2 * hR2)) : Math.max(-1, da2 / (2 * hL2)));   // upright on a mount; tumble on normal ground
+    c0 = (carrier && rideFrac !== null) ? Pat(rideFrac) : P[col()];
+    c1 = P[mod(K + (g2 >= 0 ? 1 : -1))];
+  }
   const sgn = g2 >= 0 ? 1 : -1;
-  const bandFrac = K + (da2 >= 0 ? da2 / (2 * hR2) : da2 / (2 * hL2));   // (#band) the hero's CONTINUOUS column from the carry drift -> render at Pat(bandFrac) like a mount's rideFrac, so the carried glide is smooth and never BLINKS column-to-column (the discrete P[col()] jumps a whole column when K steps)
-  const c0 = onBand ? Pat(((bandFrac % N) + N) % N) : ((carrier && rideFrac !== null) ? Pat(rideFrac) : P[col()]), c1 = P[mod(K + sgn)];
   const d3 = new THREE.Vector3(c1[0] - c0[0], 0, c1[1] - c0[1]);
   const up3 = new THREE.Vector3(0, 1, 0);
   const hang = mode === 'hang';
