@@ -1086,8 +1086,8 @@ function frame(now){
             if(ph !== M.phase){ M.phase = ph; for(const fg of M.faces) setMouth(fg, ph); }
             if(M.rideT >= 5) die("it turned.");
             if(Math.abs(rideSteer) >= (midOf(K) - angOf(K))){                      // (#1) HALF a block's swipe steps you off the lift — matches a regular cube's roll-off balance point (EDGE_BALANCE=0.5); a full block felt sticky
-              const sstep = rideSteer > 0 ? 1 : -1; rideSteer = 0;
-              mountStepOff(sstep, Math.round(heroY), -2);   // hr = round(heroY) SNAPS to the row the lift is most at (heroY is fractional as it travels); -2 = gentler lift hop. Same 4-outcome path as the horizontal mount.: K AND rot move to the gap (glide via rotLag) so the chase doesn't drag you back over the lift; ceiling above -> drop in, don't bonk up
+              const sstep = rideSteer > 0 ? -1 : 1;   // (#1) a +input (swipe right) dismounts toward K-1 — SAME as the ground roll / tapStep (which target K-pushSign on a +input). The old `?1:-1` stepped the OPPOSITE way to every other control, so the lift felt inverted.
+              if(mountStepOff(sstep, Math.round(heroY), -2)) rideSteer = 0;   // consume the swipe only on a real step-off; swiping into a wall keeps it so a flick back the open way still works (no dead "absorbed" swipe) (heroY is fractional as it travels); -2 = gentler lift hop. Same 4-outcome path as the horizontal mount.: K AND rot move to the gap (glide via rotLag) so the chase doesn't drag you back over the lift; ceiling above -> drop in, don't bonk up
             }
           } else if(M.rideT !== 0){ M.rideT = 0; M.phase = 'happy'; for(const fg of M.faces) setMouth(fg, 'happy'); }   // stepped off -> the lift goes friendly again
           continue;
@@ -1109,9 +1109,8 @@ function frame(now){
           ridingNow = true;
           if(Math.abs(rideSteer) >= (midOf(K) - angOf(K))){   // (#1) HALF a block's swipe to step off — matches a regular cube's roll-off balance point (EDGE_BALANCE=0.5); a full block felt sticky
             { const b = K - mod(K); let f = b + mod(M.c); if(f - K > N / 2) f -= N; else if(f - K < -N / 2) f += N; K = Math.round(f); rot = -angAt(f); rotTarget = rot; }   // (#1b) SNAP to the cell the mount is MOST in *this frame* — the column-sync below runs AFTER this block, so K could be a frame stale and land you a cell EARLY when the mount is mid-crossing. rot keeps the continuous visual position so the roll-off stays smooth.
-            const sstep = rideSteer > 0 ? 1 : -1;
-            rideSteer = 0;
-            mountStepOff(sstep, Math.floor(heroY + 0.02), -8);   // hr = feet row (= mount.row+1); -8 = horizontal hop strength. Unified with the vertical lift.
+            const sstep = rideSteer > 0 ? -1 : 1;   // (#1) match the GROUND roll / tapStep direction (a +input goes toward K-1) — the old `?1:-1` was inverted vs every other control
+            if(mountStepOff(sstep, Math.floor(heroY + 0.02), -8)) rideSteer = 0;   // consume the swipe only on a real step-off (a wall-blocked side keeps it, so a flick back the open way still works)
           }
           if(carrier === M){
             const cc3 = Math.round(M.c);
