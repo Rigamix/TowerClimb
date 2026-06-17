@@ -662,6 +662,31 @@ function mountUnder(sup){
   }
   return null;
 }
+// (#1) UNIFIED mount dismount — used by BOTH the horizontal mount AND the vertical lift so left/right behave IDENTICALLY in every terrain.
+// Tries, in priority: sticky-wall CLING -> STEP-UP onto a block one higher -> roll onto a LEVEL block -> HOP off into open air.
+// Caller has already SNAPPED K/heroY to the cell the mount is most in, and passes the hero's feet row `hr` and the hop velocity.
+// NEVER moves the OTHER way: every outcome only ever lands at K+sstep. Returns true if it dismounted (false => the side is walled, stay on the mount).
+function mountStepOff(sstep, hr, hopVy){
+  const nc = mod(K + sstep), F = sstep > 0 ? 'L' : 'R';
+  if(solid(nc, hr) && faced(nc, hr, F) && !solid(col(), hr)){                                                   // a STICKY wall right beside you -> cling onto it
+    justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; clAttach(nc, hr, F, -sstep);            // -sstep: keep pushing into the wall => climb UP
+  } else if(solid(nc, hr) && !solid(nc, hr + 1) && !solid(col(), hr + 1) && !spikes.has(Kk(nc, hr + 1))){       // a block ONE STEP UP (clear above, no ceiling over you, no spike) -> vault onto it
+    const oc = col(); justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'ground'; K += sstep; heroY = hr + 1; vy = 0;
+    rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
+    climbA = CLIMB_DUR;
+    climbPivot = [(P[oc][0] + P[mod(K)][0]) / 2 - 2.5, hr + 1, (P[oc][1] + P[mod(K)][1]) / 2 - 2.5];
+    climbFrom = [P[oc][0] - 2.5, hr + 0.5, P[oc][1] - 2.5];
+    climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[mod(K)][0] - P[oc][0], 0, P[mod(K)][1] - P[oc][1])).normalize();
+    tip = 0;
+  } else if(solid(nc, hr - 1) && !solid(nc, hr)){                                                               // a block LEVEL with you -> roll onto it (like rolling along two floor blocks)
+    K += sstep; justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'ground'; heroY = hr; vy = 0; squash = 0.12;
+    rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
+  } else if(canEnter(K + sstep)){                                                                               // open air -> hop off (a block OR a ceiling-spike cone capping the gap -> drop straight in, don't bonk UP into it)
+    K += sstep; justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'air'; heroY = hr; vy = (solid(K, hr + 1) || cspikes.has(Kk(K, hr + 1))) ? 0 : hopVy;
+    rotLag = rot + angOf(K); rot = -angOf(K); rotTarget = rot;
+  } else return false;                                                                                          // walled both at your level and the ledge -> can't step that way; stay on the mount
+  return true;
+}
 function placeAt(cTarget, standY){
   let d = ((cTarget - col()) % N + N) % N;
   if(d > N / 2) d -= N;
@@ -1034,9 +1059,8 @@ function frame(now){
             if(ph !== M.phase){ M.phase = ph; for(const fg of M.faces) setMouth(fg, ph); }
             if(M.rideT >= 5) die("it turned.");
             if(Math.abs(rideSteer) >= 2 * (midOf(K) - angOf(K))){                  // (#1) ONE block's swipe steps you off the lift (same finger travel as a ground roll)
-              const sstep = rideSteer > 0 ? 1 : -1; rideSteer = 0; const hr = Math.round(heroY);   // (#1) SNAP to the row the lift is MOST at (was floor(heroY+0.02) — mid-square that misaligned with the side ledges, so the dismount kept failing and felt random/one-sided)
-              if(solid(mod(K + sstep), hr - 1) && !solid(mod(K + sstep), hr)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; heroY = hr; vy = 0; squash = 0.12; rotLag = rot + angOf(K); rot = -angOf(K); rotTarget = rot; }   // a block level beside the lift -> ROLL onto it (glide in the swipe direction, was a hard snap that read as the wrong way)
-              else if(canEnter(K + sstep)){ K += sstep; carrier = null; justLeft = M; jlTimer = 0.9; heroY = hr; mode = 'air'; vy = solid(K, hr + 1) ? 0 : -2; rotLag = rot + angOf(K); rot = -angOf(K); rotTarget = rot; }   // open air -> hop off: K AND rot move to the gap (glide via rotLag) so the chase doesn't drag you back over the lift; ceiling above -> drop in, don't bonk up
+              const sstep = rideSteer > 0 ? 1 : -1; rideSteer = 0;
+              mountStepOff(sstep, Math.round(heroY), -2);   // hr = round(heroY) SNAPS to the row the lift is most at (heroY is fractional as it travels); -2 = gentler lift hop. Same 4-outcome path as the horizontal mount.: K AND rot move to the gap (glide via rotLag) so the chase doesn't drag you back over the lift; ceiling above -> drop in, don't bonk up
             }
           } else if(M.rideT !== 0){ M.rideT = 0; M.phase = 'happy'; for(const fg of M.faces) setMouth(fg, 'happy'); }   // stepped off -> the lift goes friendly again
           continue;
@@ -1060,21 +1084,7 @@ function frame(now){
             { const b = K - mod(K); let f = b + mod(M.c); if(f - K > N / 2) f -= N; else if(f - K < -N / 2) f += N; K = Math.round(f); rot = -angAt(f); rotTarget = rot; }   // (#1b) SNAP to the cell the mount is MOST in *this frame* — the column-sync below runs AFTER this block, so K could be a frame stale and land you a cell EARLY when the mount is mid-crossing. rot keeps the continuous visual position so the roll-off stays smooth.
             const sstep = rideSteer > 0 ? 1 : -1;
             rideSteer = 0;
-            const nc = mod(K + sstep), hr = Math.floor(heroY + 0.02), F = sstep > 0 ? 'L' : 'R';   // hr = the hero's feet row (= the mount's row + 1)
-            if(solid(nc, hr) && faced(nc, hr, F) && !solid(col(), hr)){   // a STICKY wall right beside you -> cling onto it, exactly like rolling/falling into a sticky wall from the ground
-              justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; clAttach(nc, hr, F, -sstep);   // -sstep: keep pushing into the wall => climb UP
-            } else if(solid(nc, hr) && !solid(nc, hr + 1) && !solid(col(), hr + 1) && !spikes.has(Kk(nc, hr + 1))){   // a block ONE STEP UP beside the mount -> climb/vault onto it (like the ground step-up)
-              const oc = col(); justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'ground'; K += sstep; heroY = hr + 1; vy = 0;
-              rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;
-              climbA = CLIMB_DUR;
-              climbPivot = [(P[oc][0] + P[mod(K)][0]) / 2 - 2.5, hr + 1, (P[oc][1] + P[mod(K)][1]) / 2 - 2.5];
-              climbFrom = [P[oc][0] - 2.5, hr + 0.5, P[oc][1] - 2.5];
-              climbAxis = new THREE.Vector3(0, 1, 0).cross(new THREE.Vector3(P[mod(K)][0] - P[oc][0], 0, P[mod(K)][1] - P[oc][1])).normalize();
-              tip = 0;
-            } else if(solid(nc, hr - 1) && !solid(nc, hr)){              // a block LEVEL with you (next to the mount) -> ROLL onto it like rolling along two floor blocks (no hop)
-              const oc = col(); K += sstep; justLeft = carrier; jlTimer = 0.9; carrier = null; rideFrac = null; mode = 'ground'; heroY = hr; vy = 0; squash = 0.12;
-              rotLagInit = rot + angOf(K); rotLag = rotLagInit; rot = -angOf(K); rotTarget = rot;   // the view recenters with a roll, so the cube rolls off the mount onto the block
-            } else if(canEnter(K + sstep)){ justLeft = carrier; jlTimer = 0.9; K += sstep; carrier = null; rideFrac = null; mode = 'air'; vy = solid(K, hr + 1) ? 0 : -8; rotLag = rot + angOf(K); rot = -angOf(K); rotTarget = rot; }   // open air -> hop off: move K AND rot to the gap (glide via rotLag) so the air chase doesn't pull you back onto the mount; a ceiling capping the gap -> drop straight in instead of bonking UP into it
+            mountStepOff(sstep, Math.floor(heroY + 0.02), -8);   // hr = feet row (= mount.row+1); -8 = horizontal hop strength. Unified with the vertical lift.
           }
           if(carrier === M){
             const cc3 = Math.round(M.c);
