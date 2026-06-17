@@ -299,7 +299,7 @@ let solidSet, pads, sticky, wallSticky, faceSet, sandSet, sandTimers, spikes, cs
 let cubeList, coinMeshes, keyMeshes, bandCubes, spikeMeshes, sandMeshes, chestMeshes, doorMeshes, countDoorMeshes;
 function solid(c, r){
   if(r < 0) return true;
-  for(const B of BANDS) if(r >= B.r0 && r <= B.r1) return B.set.has(Kk(Math.round(c - B.off), r));   // off is a continuous float now — the nearest band-local cell decides solidity
+  for(const B of BANDS) if(r >= B.r0 && r <= B.r1) return B.set.has(Kk(mod(Math.round(c - B.off)), r));   // off is a continuous float now — the nearest band-local cell decides solidity. mod() WRAPS the cell index to [0,N): off accumulates unbounded as the platform circles, but the render (Pat) wraps to the ring, so WITHOUT mod the collision drifts out of sync with the visual after ~one loop (the band would clip through you on its way back around).
   return solidSet.has(Kk(c, r)) || chestSet.has(Kk(c, r)) || doorSet.has(Kk(c, r)) || countDoorSet.has(Kk(c, r));
 }
 function faced(c, r, F){ return faceSet.has(Kk(c, r) + ',' + F); }   // single-sided sticky test (the painted face exists here)
@@ -1025,10 +1025,10 @@ function frame(now){
     let ride = false;
     if(mode === 'ground'){
       const sup = Math.floor(heroY + 0.02) - 1;
-      if(sup >= B.r0 && sup <= B.r1 && B.set.has(Kk(Math.round(col() - B.off), sup))) ride = true;
+      if(sup >= B.r0 && sup <= B.r1 && B.set.has(Kk(mod(Math.round(col() - B.off)), sup))) ride = true;
     } else if(mode === 'cling' && clFace === 'B' && B.bottomSticky){
       const hr = clCell ? clCell[1] : Math.floor(heroY + 0.999);
-      if(hr >= B.r0 && hr <= B.r1 && B.set.has(Kk(Math.round(col() - B.off), hr))) ride = true;
+      if(hr >= B.r0 && hr <= B.r1 && B.set.has(Kk(mod(Math.round(col() - B.off)), hr))) ride = true;
     }
     if(ride){
       onBand = true; bandRef = B;
@@ -1052,7 +1052,7 @@ function frame(now){
       const da2s = (-rot) - angOf(K), hR2s = midOf(K) - angOf(K), hL2s = angOf(K) - midOf(K - 1);
       const hf = K + (da2s >= 0 ? da2s / (2 * hR2s) : da2s / (2 * hL2s));               // your continuous world column
       let pushing = false;                                                             // a band cell sits AT or just behind you on the push side — a CONTINUOUS test (uses hf, not the discrete cell at K-dir) so it doesn't flicker as your column steps
-      for(const key of B.set){ const rel = ((+key.split(',')[0] + B.off) - hf) * B.dir; if(rel > -1.3 && rel < 0.5){ pushing = true; break; } }
+      for(const key of B.set){ let d = ((+key.split(',')[0] + B.off) - hf) % N; if(d > N / 2) d -= N; else if(d < -N / 2) d += N; const rel = d * B.dir; if(rel > -1.3 && rel < 0.5){ pushing = true; break; } }   // d wrapped to [-N/2,N/2]: hf (your winding column) and localCol+off (the band's accumulated offset) live in different winding frames, so compare them around the RING, not raw — else the push misses once the band has looped
       if(pushing){
         bandPush = true;                                                               // (suppresses the idle settle so it doesn't fight the push)
         const dRot = -(angAt(hf + doff) - angAt(hf));                                   // drift you EXACTLY the band's speed (same carry maths as a rider) -> you hold a fixed offset from it, never falling behind into a re-overlap, so it rolls smoothly instead of snapping per square
