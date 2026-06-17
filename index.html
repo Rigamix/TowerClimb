@@ -363,7 +363,7 @@ function populateCustom(){
       }
     }
   }
-  for(const wr in bandRows){ const b = bandRows[wr]; BANDS.push({ r0: +wr, r1: +wr, off: 0, dir: b.dir, speed: 0.8, set: b.set }); }   // (#band) one continuous band per row painted with > / <
+  for(const wr in bandRows){ const b = bandRows[wr]; BANDS.push({ r0: +wr, r1: +wr, off: 0, dir: b.dir, speed: 1.6, set: b.set }); }   // (#band) one continuous band per row painted with > / < ; 1.6 cols/sec
   for(const sl of (CUSTOM.stickLines || [])){   // per-face sticky → the editor painted these EXACT faces (single-sided)
     const mm = sl.trim().match(/^(\d+),(\d+)\s+([TBLROI]+)$/); if(!mm) continue;
     const c = +mm[1], wr = (+mm[2]) + BASE, f = mm[3];
@@ -1561,10 +1561,10 @@ function frame(now){
   const hL2 = angOf(K) - midOf(K - 1), hR2 = midOf(K) - angOf(K);
   const erot = rot + rotLag;            // the angle actually shown this frame
   const da2 = (-erot) - angOf(K);
-  const bandUpright = onBand && !driving && Math.abs(rotTarget - rot) < 0.02;   // (#band) idle-carried on a moving floor -> render UPRIGHT (like a mount), so the smooth carry doesn't read as a lean; rolling on it still tumbles
-  const g2 = (carryT > 0 || carrier || bandUpright) ? 0 : (da2 >= 0 ? Math.min(1, da2 / (2 * hR2)) : Math.max(-1, da2 / (2 * hL2)));   // visual roll follows clear to 90° at an edge (was clamped at 45° -> froze, then the physics snapped past it)
+  const g2 = (carryT > 0 || carrier || onBand) ? 0 : (da2 >= 0 ? Math.min(1, da2 / (2 * hR2)) : Math.max(-1, da2 / (2 * hL2)));   // UPRIGHT on a mount OR a moving band (the carry drifts rot; a lean would read as a tilt); rolling on normal ground still tumbles
   const sgn = g2 >= 0 ? 1 : -1;
-  const c0 = (carrier && rideFrac !== null) ? Pat(rideFrac) : P[col()], c1 = P[mod(K + sgn)];
+  const bandFrac = K + (da2 >= 0 ? da2 / (2 * hR2) : da2 / (2 * hL2));   // (#band) the hero's CONTINUOUS column from the carry drift -> render at Pat(bandFrac) like a mount's rideFrac, so the carried glide is smooth and never BLINKS column-to-column (the discrete P[col()] jumps a whole column when K steps)
+  const c0 = onBand ? Pat(((bandFrac % N) + N) % N) : ((carrier && rideFrac !== null) ? Pat(rideFrac) : P[col()]), c1 = P[mod(K + sgn)];
   const d3 = new THREE.Vector3(c1[0] - c0[0], 0, c1[1] - c0[1]);
   const up3 = new THREE.Vector3(0, 1, 0);
   const hang = mode === 'hang';
