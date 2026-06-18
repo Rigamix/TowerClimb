@@ -319,11 +319,14 @@ function loadCustom(){
   let codeDiv = null;                                                    // a DIVIDERS line in the code carries the editor's band boundaries (self-contained export)
   const dvi = body.findIndex(l => /^DIVIDERS/i.test(l.trim()));
   if(dvi >= 0){ codeDiv = body[dvi].replace(/DIVIDERS/i, '').trim().split(/[,\s]+/).map(Number).filter(n => n > 0); body = body.slice(0, dvi).concat(body.slice(dvi + 1)); }
+  let mobSpeed = 0;                                                       // a MOBSPEED line speeds up ALL custom mobs (for timing challenges); default keeps 1.6
+  const msi = body.findIndex(l => /^MOBSPEED/i.test(l.trim()));
+  if(msi >= 0){ mobSpeed = parseFloat(body[msi].replace(/MOBSPEED/i, '').trim()) || 0; body = body.slice(0, msi).concat(body.slice(msi + 1)); }
   let stickLines = [];
   const si = body.findIndex(l => l.trim() === 'STICK');
   if(si >= 0){ stickLines = body.slice(si + 1); body = body.slice(0, si); }   // per-face sticky section
   if(!body.length) return null;
-  return { body, rows: body.length, BASE: 2, dividers: ((codeDiv && codeDiv.length ? codeDiv : data.dividers) || []).filter(d => d > 0).sort((a, b) => a - b), stickLines };
+  return { body, rows: body.length, BASE: 2, dividers: ((codeDiv && codeDiv.length ? codeDiv : data.dividers) || []).filter(d => d > 0).sort((a, b) => a - b), stickLines, mobSpeed };
 }
 function mkMon(c, wr, type, vert){ return { row: wr, c, dir: 1, speed: 1.6, state: 'alive', thawT: 0, grp: null, bodyMat: null, type, vert: !!vert, phase: 'happy', rideT: 0, lastCell: c, faces: null }; }
 function populateCustom(){
@@ -368,6 +371,7 @@ function populateCustom(){
     }
   }
   for(const wr in bandRows){ const b = bandRows[wr]; BANDS.push({ r0: +wr, r1: +wr, off: 0, dir: b.dir, speed: b.speed, set: b.set }); }   // (#band) one continuous band per row; speed from the token (1.6 normal, 3.0 fast)
+  if(CUSTOM.mobSpeed) for(const M of MONSTERS) M.speed = CUSTOM.mobSpeed;   // a MOBSPEED line makes every custom mob faster — turns a patrol into a timing gate
   for(const sl of (CUSTOM.stickLines || [])){   // per-face sticky → the editor painted these EXACT faces (single-sided)
     const mm = sl.trim().match(/^(\d+),(\d+)\s+([TBLROI]+)$/); if(!mm) continue;
     const c = +mm[1], wr = (+mm[2]) + BASE, f = mm[3];
