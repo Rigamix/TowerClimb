@@ -359,11 +359,15 @@ function populateCustom(){
         case 'X': MONSTERS.push(mkMon(c, wr, 'spiky', true)); break;    // vertical-patrol variants (same archetypes, move up/down)
         case 'W': MONSTERS.push(mkMon(c, wr, 'normal', true)); break;
         case 'Y': MONSTERS.push(mkMon(c, wr, 'mount', true)); break;
-        case '>': case '<': { const b = bandRows[wr] || (bandRows[wr] = { dir: ch === '>' ? 1 : -1, set: new Set() }); b.dir = ch === '>' ? 1 : -1; b.set.add(Kk(c, wr)); break; }   // (#band) moving-floor cell; '>' right, '<' left — all cells in a row form ONE band
+        case '>': case '<': case ')': case '(': {   // (#band) moving-floor cell; > right / < left @ 1.6 c/s, ) right / ( left @ FAST 3.0 c/s (for timing/threading challenges). All cells in a row form ONE band.
+          const fast = ch === ')' || ch === '(', dir = (ch === '>' || ch === ')') ? 1 : -1;
+          const b = bandRows[wr] || (bandRows[wr] = { dir, speed: fast ? 3.0 : 1.6, set: new Set() });
+          b.dir = dir; b.speed = fast ? 3.0 : 1.6; b.set.add(Kk(c, wr)); break;
+        }
       }
     }
   }
-  for(const wr in bandRows){ const b = bandRows[wr]; BANDS.push({ r0: +wr, r1: +wr, off: 0, dir: b.dir, speed: 1.6, set: b.set }); }   // (#band) one continuous band per row painted with > / < ; 1.6 cols/sec
+  for(const wr in bandRows){ const b = bandRows[wr]; BANDS.push({ r0: +wr, r1: +wr, off: 0, dir: b.dir, speed: b.speed, set: b.set }); }   // (#band) one continuous band per row; speed from the token (1.6 normal, 3.0 fast)
   for(const sl of (CUSTOM.stickLines || [])){   // per-face sticky → the editor painted these EXACT faces (single-sided)
     const mm = sl.trim().match(/^(\d+),(\d+)\s+([TBLROI]+)$/); if(!mm) continue;
     const c = +mm[1], wr = (+mm[2]) + BASE, f = mm[3];
